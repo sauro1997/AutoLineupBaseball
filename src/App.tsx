@@ -15,6 +15,36 @@ import {
 } from './domain'
 import { generateLineup, summarizeLineup } from './lib/lineupEngine'
 
+function PosBadge({ position }: { position: Position }) {
+  return <span className={`pos-badge pos-${position}`}>{position}</span>
+}
+
+function DiamondSVG() {
+  return (
+    <svg
+      width="96"
+      height="96"
+      viewBox="0 0 96 96"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+      aria-hidden="true"
+      style={{ flexShrink: 0, opacity: 0.85 }}
+    >
+      <path d="M8 88 Q48 4 88 88 Z" fill="rgba(27,107,53,0.25)" stroke="rgba(76,175,80,0.3)" strokeWidth="1" />
+      <polygon points="48,28 74,54 48,80 22,54" fill="rgba(124,59,14,0.35)" stroke="rgba(253,186,116,0.4)" strokeWidth="1" />
+      <line x1="48" y1="80" x2="74" y2="54" stroke="rgba(240,237,217,0.5)" strokeWidth="1" />
+      <line x1="48" y1="80" x2="22" y2="54" stroke="rgba(240,237,217,0.5)" strokeWidth="1" />
+      <line x1="22" y1="54" x2="48" y2="28" stroke="rgba(240,237,217,0.5)" strokeWidth="1" />
+      <line x1="74" y1="54" x2="48" y2="28" stroke="rgba(240,237,217,0.5)" strokeWidth="1" />
+      <rect x="44" y="76" width="8" height="8" rx="1" fill="#F0EDD9" />
+      <rect x="70" y="50" width="8" height="8" rx="1" fill="#FFD700" />
+      <rect x="44" y="24" width="8" height="8" rx="1" fill="#FFD700" />
+      <rect x="18" y="50" width="8" height="8" rx="1" fill="#FFD700" />
+      <circle cx="48" cy="52" r="4" fill="rgba(180,83,9,0.8)" stroke="rgba(253,186,116,0.6)" strokeWidth="1" />
+    </svg>
+  )
+}
+
 const STORAGE_KEY = 'autolineup-state-v1'
 
 function parsePositionList(value: string) {
@@ -188,25 +218,26 @@ function App() {
     <div className="app-shell">
       <header className="hero-card">
         <div>
-          <p className="eyebrow">MVP — Baseball intelligent</p>
+          <p className="eyebrow">&#9918; Field Manager &mdash; Baseball intelligent</p>
           <h1>AutoLineup Baseball</h1>
           <p className="lede">
-            Gérez votre équipe, configurez un match, générez un lineup par manche et ajustez-le manuellement
-            sans perdre les contraintes clés du match.
+            G&eacute;rez votre roster, configurez un match, g&eacute;n&eacute;rez un lineup optimis&eacute; par manche et ajustez-le
+            manuellement sans perdre les contraintes cl&eacute;s.
           </p>
         </div>
+        <DiamondSVG />
         <div className="hero-actions">
           <button type="button" onClick={copyShareLink}>
-            Copier le lien du match
+            &#128279; Copier le lien du match
           </button>
           <button type="button" onClick={copySummary}>
-            Copier le résumé
+            &#128203; Copier le r&eacute;sum&eacute;
           </button>
           <button type="button" onClick={printLineup}>
-            Export PDF
+            &#128424; Export PDF
           </button>
           <button type="button" className="ghost" onClick={resetDemo}>
-            Réinitialiser la démo
+            &#8635; R&eacute;initialiser la d&eacute;mo
           </button>
         </div>
       </header>
@@ -215,8 +246,8 @@ function App() {
         <article className="panel">
           <div className="panel-heading">
             <div>
-              <p className="eyebrow">1. Dashboard équipe</p>
-              <h2>Équipe & roster</h2>
+              <p className="eyebrow">1. Roster &eacute;quipe</p>
+              <h2>&#9918; &Eacute;quipe &amp; roster</h2>
             </div>
             <button type="button" onClick={addPlayer}>
               Ajouter un joueur
@@ -350,8 +381,8 @@ function App() {
         <article className="panel">
           <div className="panel-heading">
             <div>
-              <p className="eyebrow">2. Création match</p>
-              <h2>Paramètres du match</h2>
+              <p className="eyebrow">2. Param&egrave;tres du match</p>
+              <h2>&#9881;&#65039; Configuration</h2>
             </div>
           </div>
 
@@ -465,8 +496,8 @@ function App() {
       <section className="panel">
         <div className="panel-heading">
           <div>
-            <p className="eyebrow">3. Générateur lineup</p>
-            <h2>Alignements par manche</h2>
+            <p className="eyebrow">3. G&eacute;n&eacute;rateur lineup</p>
+            <h2>&#128203; Alignements par manche</h2>
           </div>
           <p className="status-chip">{status}</p>
         </div>
@@ -476,7 +507,7 @@ function App() {
             <article key={inning.inning} className="inning-card">
               <div className="inning-card-header">
                 <h3>Manche {inning.inning}</h3>
-                <span>Score {inning.score}</span>
+                <span className="inning-score">Score {inning.score}</span>
               </div>
               <table>
                 <thead>
@@ -491,7 +522,7 @@ function App() {
                     const overrideKey = createOverrideKey(inning.inning, position)
                     return (
                       <tr key={position}>
-                        <td>{position}</td>
+                        <td><PosBadge position={position} /></td>
                         <td>
                           <select
                             value={manualOverrides[overrideKey] ?? inning.assignments[position]}
@@ -519,7 +550,7 @@ function App() {
                 </tbody>
               </table>
               <p className="bench-line">
-                Banc: {inning.bench.map((playerId) => playerNames[playerId]).join(', ') || 'Aucun'}
+                &#129681; Dugout&nbsp;: {inning.bench.map((playerId) => playerNames[playerId]).join(', ') || 'Aucun'}
               </p>
               <ul className="notes-list">
                 {inning.notes.map((note) => (
@@ -535,8 +566,8 @@ function App() {
         <article className="panel">
           <div className="panel-heading">
             <div>
-              <p className="eyebrow">4. Éditeur manuel</p>
-              <h2>Réaffectation rapide</h2>
+              <p className="eyebrow">4. Stats roster</p>
+              <h2>&#128202; Temps de jeu</h2>
             </div>
           </div>
           <p>
@@ -547,8 +578,8 @@ function App() {
             {players.map((player) => (
               <div key={player.id} className="metric-card">
                 <strong>{player.name}</strong>
-                <span>{lineup.totals[player.id] ?? 0} manches jouées</span>
-                <span>Lock global: {player.lockedPosition ?? 'aucun'}</span>
+                <span>&#9201; {lineup.totals[player.id] ?? 0} manches jou&eacute;es</span>
+                <span>&#128274; Lock&nbsp;: {player.lockedPosition ?? 'aucun'}</span>
               </div>
             ))}
           </div>
@@ -558,7 +589,7 @@ function App() {
           <div className="panel-heading">
             <div>
               <p className="eyebrow">5. Roadmap produit</p>
-              <h2>Vision de plateforme</h2>
+              <h2>&#128640; Vision de plateforme</h2>
             </div>
           </div>
           <div className="roadmap">
