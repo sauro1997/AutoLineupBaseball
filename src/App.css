@@ -1,0 +1,218 @@
+.app-shell {
+  display: grid;
+  gap: 1.5rem;
+  padding: 2rem;
+}
+
+.hero-card,
+.panel,
+.inning-card,
+.metric-card,
+.player-card {
+  border: 1px solid #d6dceb;
+  border-radius: 20px;
+  background: #ffffff;
+  box-shadow: 0 18px 45px rgba(15, 23, 42, 0.08);
+}
+
+.hero-card,
+.panel,
+.player-card,
+.inning-card {
+  padding: 1.5rem;
+}
+
+.hero-card {
+  display: flex;
+  justify-content: space-between;
+  gap: 1.5rem;
+  align-items: flex-start;
+}
+
+.hero-actions {
+  display: grid;
+  gap: 0.75rem;
+  min-width: 220px;
+}
+
+.grid {
+  display: grid;
+  gap: 1.5rem;
+}
+
+.two-columns {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.stack {
+  display: grid;
+  gap: 1rem;
+}
+
+.stack.compact {
+  gap: 0.75rem;
+}
+
+.panel-heading,
+.player-card-header,
+.inning-card-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: center;
+}
+
+.eyebrow {
+  margin: 0 0 0.35rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 0.78rem;
+  color: #3357a8;
+  font-weight: 700;
+}
+
+.lede {
+  max-width: 60ch;
+}
+
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.85rem;
+}
+
+.roster-list,
+.lineup-grid,
+.metrics-grid,
+.roadmap,
+.notes-list,
+.toggle-list {
+  display: grid;
+  gap: 1rem;
+}
+
+.lineup-grid {
+  grid-template-columns: repeat(auto-fit, minmax(295px, 1fr));
+}
+
+.metrics-grid {
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+.roadmap {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.metric-card {
+  padding: 1rem;
+  display: grid;
+  gap: 0.4rem;
+}
+
+.toggle-list {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin: 1rem 0;
+}
+
+.toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  padding: 0.85rem 1rem;
+  border-radius: 14px;
+  background: #eff5ff;
+}
+
+label {
+  display: grid;
+  gap: 0.35rem;
+  color: #334155;
+  font-size: 0.95rem;
+}
+
+input,
+select,
+button,
+textarea {
+  font: inherit;
+}
+
+input,
+select {
+  border: 1px solid #bfd0f7;
+  border-radius: 12px;
+  background: #f8fbff;
+  color: #0f172a;
+  padding: 0.8rem 0.9rem;
+}
+
+button {
+  border: none;
+  border-radius: 999px;
+  padding: 0.8rem 1rem;
+  cursor: pointer;
+  background: #1d4ed8;
+  color: white;
+  font-weight: 600;
+}
+
+button.ghost {
+  background: #e2e8f0;
+  color: #0f172a;
+}
+
+button.danger {
+  color: #991b1b;
+}
+
+button.active-lock {
+  background: #0f766e;
+}
+
+.status-chip {
+  background: #dbeafe;
+  color: #1d4ed8;
+  border-radius: 999px;
+  padding: 0.5rem 0.85rem;
+  margin: 0;
+}
+
+.rule-summary,
+.bench-line {
+  margin-top: 1rem;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 1rem;
+}
+
+th,
+td {
+  text-align: left;
+  padding: 0.6rem;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.notes-list,
+.rule-summary ul,
+.roadmap ul {
+  margin: 0;
+  padding-left: 1.2rem;
+}
+
+@media (max-width: 1024px) {
+  .two-columns,
+  .form-grid,
+  .roadmap,
+  .toggle-list,
+  .hero-card {
+    grid-template-columns: 1fr;
+    flex-direction: column;
+  }
+
+  .app-shell {
+    padding: 1rem;
+  }
+}
