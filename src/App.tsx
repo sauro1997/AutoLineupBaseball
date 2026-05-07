@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import './App.css'
 import { demoPlayers, demoRules, demoTeam } from './data/demo'
 import {
@@ -16,6 +16,9 @@ import {
 import { generateLineup, summarizeLineup } from './lib/lineupEngine'
 
 const STORAGE_KEY = 'autolineup-state-v1'
+const AUTH_KEY = 'autolineup-auth-v1'
+const EXPECTED_USERNAME = import.meta.env.VITE_APP_USERNAME as string | undefined
+const EXPECTED_PASSWORD = import.meta.env.VITE_APP_PASSWORD as string | undefined
 
 function parsePositionList(value: string) {
   return value
@@ -593,4 +596,69 @@ function App() {
   )
 }
 
-export default App
+function LoginGate() {
+  const [authed, setAuthed] = useState(() => window.sessionStorage.getItem(AUTH_KEY) === 'true')
+  const [username, setUsername] = useState('')
+  const [password, setPassword] = useState('')
+  const [error, setError] = useState('')
+
+  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const validUsername = EXPECTED_USERNAME ?? 'admin'
+    const validPassword = EXPECTED_PASSWORD ?? 'password'
+    if (username === validUsername && password === validPassword) {
+      window.sessionStorage.setItem(AUTH_KEY, 'true')
+      setAuthed(true)
+    } else {
+      setError('Identifiants incorrects.')
+    }
+  }
+
+  if (authed) return <App />
+
+  return (
+    <div className="app-shell">
+      <header className="hero-card">
+        <div>
+          <p className="eyebrow">MVP — Baseball intelligent</p>
+          <h1>AutoLineup Baseball</h1>
+        </div>
+      </header>
+      <section className="grid" style={{ justifyContent: 'center' }}>
+        <article className="panel" style={{ maxWidth: '360px', width: '100%' }}>
+          <div className="panel-heading">
+            <div>
+              <h2>Connexion</h2>
+            </div>
+          </div>
+          <form className="stack" onSubmit={handleSubmit}>
+            <label>
+              Utilisateur
+              <input
+                type="text"
+                autoComplete="username"
+                value={username}
+                onChange={(e) => { setUsername(e.target.value); setError('') }}
+                required
+              />
+            </label>
+            <label>
+              Mot de passe
+              <input
+                type="password"
+                autoComplete="current-password"
+                value={password}
+                onChange={(e) => { setPassword(e.target.value); setError('') }}
+                required
+              />
+            </label>
+            {error && <p style={{ color: 'var(--danger, #c0392b)', margin: 0 }}>{error}</p>}
+            <button type="submit">Se connecter</button>
+          </form>
+        </article>
+      </section>
+    </div>
+  )
+}
+
+export default LoginGate

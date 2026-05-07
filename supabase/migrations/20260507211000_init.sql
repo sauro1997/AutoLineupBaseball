@@ -2,7 +2,7 @@ create extension if not exists pgcrypto;
 
 create table if not exists public.teams (
   id uuid primary key default gen_random_uuid(),
-  owner_id uuid not null references auth.users (id) on delete cascade,
+  owner_username text not null,
   name text not null,
   logo_url text,
   created_at timestamptz not null default now()
@@ -47,60 +47,4 @@ create table if not exists public.lineups (
   unique (game_id, inning, position)
 );
 
-create or replace function public.is_team_owner(target_team_id uuid)
-returns boolean
-language sql
-stable
-as $$
-  select exists (
-    select 1
-    from public.teams teams
-    where teams.id = target_team_id
-      and teams.owner_id = auth.uid()
-  );
-$$;
 
-alter table public.teams enable row level security;
-alter table public.players enable row level security;
-alter table public.games enable row level security;
-alter table public.rules enable row level security;
-alter table public.lineups enable row level security;
-
-create policy "team owners manage their teams"
-  on public.teams
-  using (owner_id = auth.uid())
-  with check (owner_id = auth.uid());
-
-create policy "team owners manage players"
-  on public.players
-  using (public.is_team_owner(team_id))
-  with check (public.is_team_owner(team_id));
-
-create policy "team owners manage games"
-  on public.games
-  using (public.is_team_owner(team_id))
-  with check (public.is_team_owner(team_id));
-
-create policy "team owners manage rules"
-  on public.rules
-  using (public.is_team_owner(team_id))
-  with check (public.is_team_owner(team_id));
-
-create policy "team owners manage lineups"
-  on public.lineups
-  using (
-    exists (
-      select 1
-      from public.games games
-      where games.id = game_id
-        and public.is_team_owner(games.team_id)
-    )
-  )
-  with check (
-    exists (
-      select 1
-      from public.games games
-      where games.id = game_id
-        and public.is_team_owner(games.team_id)
-    )
-  );
