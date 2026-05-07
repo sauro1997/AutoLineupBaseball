@@ -26,8 +26,8 @@ type SearchState = {
   bestScore: number
 }
 
-function buildInitialPlayerState(players: Player[]): Record<string, PlayerState> {
-  return Object.fromEntries(
+function buildInitialPlayerState(players: Player[]) {
+  return new Map<string, PlayerState>(
     players.map((player) => [
       player.id,
       {
@@ -36,7 +36,7 @@ function buildInitialPlayerState(players: Player[]): Record<string, PlayerState>
         consecutiveBench: 0,
         repeatedPositionCount: 0,
         benchLastInning: false,
-      },
+      } as PlayerState,
     ]),
   )
 }
@@ -97,9 +97,9 @@ function canTakePosition(
   return getCompatibilityScore(player, position) > POSITION_SCORES.incompatible
 }
 
-function mandatoryPlayers(playerStates: Record<string, PlayerState>, rules: MatchRules) {
+function mandatoryPlayers(playerStates: Map<string, PlayerState>, rules: MatchRules) {
   return new Set(
-    Object.entries(playerStates)
+    [...playerStates.entries()]
       .filter(([, state]) => rules.maxConsecutiveBench > 0 && state.consecutiveBench >= rules.maxConsecutiveBench)
       .map(([playerId]) => playerId),
   )
@@ -108,7 +108,7 @@ function mandatoryPlayers(playerStates: Record<string, PlayerState>, rules: Matc
 function generateBestAssignments(
   players: Player[],
   rules: MatchRules,
-  playerStates: Record<string, PlayerState>,
+  playerStates: Map<string, PlayerState>,
   inning: number,
   lockedAssignments: Record<Position, string>,
 ) {
@@ -133,10 +133,10 @@ function generateBestAssignments(
 
     const forcedPlayerId = sanitizedLockedAssignments[position]
     const rankedCandidates = players
-      .filter((player) => canTakePosition(player, position, rules, playerStates[player.id], forcedPlayerId))
+      .filter((player) => canTakePosition(player, position, rules, playerStates.get(player.id)!, forcedPlayerId))
       .sort((left, right) => {
-        const leftScore = getAssignmentScore(left, playerStates[left.id], position, inning, rules)
-        const rightScore = getAssignmentScore(right, playerStates[right.id], position, inning, rules)
+        const leftScore = getAssignmentScore(left, playerStates.get(left.id)!, position, inning, rules)
+        const rightScore = getAssignmentScore(right, playerStates.get(right.id)!, position, inning, rules)
 
         return rightScore - leftScore
       })
@@ -165,7 +165,7 @@ function generateBestAssignments(
       const compatibility = getCompatibilityScore(candidate, position)
       if (compatibility <= POSITION_SCORES.incompatible) continue
 
-      const playerState = playerStates[candidate.id]
+      const playerState = playerStates.get(candidate.id)!
       const candidateScore = getAssignmentScore(candidate, playerState, position, inning, rules)
 
       assignments[position] = candidate.id
@@ -178,7 +178,7 @@ function generateBestAssignments(
 
   const initialScore = Object.entries(seededAssignments).reduce((total, [position, playerId]) => {
     const player = playersById[playerId]
-    return total + getAssignmentScore(player, playerStates[playerId], position as Position, inning, rules)
+    return total + getAssignmentScore(player, playerStates.get(playerId)!, position as Position, inning, rules)
   }, 0)
 
   search(0, { ...seededAssignments }, new Set(seededPlayers), initialScore)
@@ -278,7 +278,7 @@ export function generateLineup(
     const notes = [] as string[]
 
     for (const player of players) {
-      const state = playerStates[player.id]
+      const state = playerStates.get(player.id)!
       if (usedPlayers.has(player.id)) {
         state.inningsPlayed += 1
         state.benchLastInning = false
@@ -319,7 +319,7 @@ export function generateLineup(
     innings.push({ inning, assignments, bench, score, notes })
   }
 
-  const totals = Object.fromEntries(players.map((player) => [player.id, playerStates[player.id].inningsPlayed]))
+  const totals = Object.fromEntries(players.map((player) => [player.id, playerStates.get(player.id)!.inningsPlayed]))
 
   return { innings, totals }
 }
