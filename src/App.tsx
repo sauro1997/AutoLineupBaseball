@@ -218,26 +218,26 @@ function App() {
     <div className="app-shell">
       <header className="hero-card">
         <div>
-          <p className="eyebrow">&#9918; Field Manager &mdash; Baseball intelligent</p>
+          <p className="eyebrow">⚾ Field Manager — Baseball intelligent</p>
           <h1>AutoLineup Baseball</h1>
           <p className="lede">
-            G&eacute;rez votre roster, configurez un match, g&eacute;n&eacute;rez un lineup optimis&eacute; par manche et ajustez-le
-            manuellement sans perdre les contraintes cl&eacute;s.
+            Gérez votre roster, configurez un match, générez un lineup optimisé par manche et ajustez-le
+            manuellement sans perdre les contraintes clés.
           </p>
         </div>
         <DiamondSVG />
         <div className="hero-actions">
           <button type="button" onClick={copyShareLink}>
-            &#128279; Copier le lien du match
+            🔗 Copier le lien du match
           </button>
           <button type="button" onClick={copySummary}>
-            &#128203; Copier le r&eacute;sum&eacute;
+            📋 Copier le résumé
           </button>
           <button type="button" onClick={printLineup}>
-            &#128424; Export PDF
+            🖨️ Export PDF
           </button>
           <button type="button" className="ghost" onClick={resetDemo}>
-            &#8635; R&eacute;initialiser la d&eacute;mo
+            ↺ Réinitialiser la démo
           </button>
         </div>
       </header>
@@ -246,8 +246,8 @@ function App() {
         <article className="panel">
           <div className="panel-heading">
             <div>
-              <p className="eyebrow">1. Roster &eacute;quipe</p>
-              <h2>&#9918; &Eacute;quipe &amp; roster</h2>
+              <p className="eyebrow">1. Roster équipe</p>
+              <h2>⚾ Équipe & roster</h2>
             </div>
             <button type="button" onClick={addPlayer}>
               Ajouter un joueur
@@ -381,8 +381,8 @@ function App() {
         <article className="panel">
           <div className="panel-heading">
             <div>
-              <p className="eyebrow">2. Param&egrave;tres du match</p>
-              <h2>&#9881;&#65039; Configuration</h2>
+              <p className="eyebrow">2. Paramètres du match</p>
+              <h2>⚙️ Configuration</h2>
             </div>
           </div>
 
@@ -496,8 +496,8 @@ function App() {
       <section className="panel">
         <div className="panel-heading">
           <div>
-            <p className="eyebrow">3. G&eacute;n&eacute;rateur lineup</p>
-            <h2>&#128203; Alignements par manche</h2>
+            <p className="eyebrow">3. Générateur lineup</p>
+            <h2>📋 Alignements par manche</h2>
           </div>
           <p className="status-chip">{status}</p>
         </div>
@@ -550,7 +550,7 @@ function App() {
                 </tbody>
               </table>
               <p className="bench-line">
-                &#129681; Dugout&nbsp;: {inning.bench.map((playerId) => playerNames[playerId]).join(', ') || 'Aucun'}
+                🪑 Dugout : {inning.bench.map((playerId) => playerNames[playerId]).join(', ') || 'Aucun'}
               </p>
               <ul className="notes-list">
                 {inning.notes.map((note) => (
@@ -567,7 +567,7 @@ function App() {
           <div className="panel-heading">
             <div>
               <p className="eyebrow">4. Stats roster</p>
-              <h2>&#128202; Temps de jeu</h2>
+              <h2>📊 Temps de jeu</h2>
             </div>
           </div>
           <p>
@@ -578,8 +578,8 @@ function App() {
             {players.map((player) => (
               <div key={player.id} className="metric-card">
                 <strong>{player.name}</strong>
-                <span>&#9201; {lineup.totals[player.id] ?? 0} manches jou&eacute;es</span>
-                <span>&#128274; Lock&nbsp;: {player.lockedPosition ?? 'aucun'}</span>
+                <span>⏱ {lineup.totals[player.id] ?? 0} manches jouées</span>
+                <span>🔒 Lock : {player.lockedPosition ?? 'aucun'}</span>
               </div>
             ))}
           </div>
@@ -589,7 +589,7 @@ function App() {
           <div className="panel-heading">
             <div>
               <p className="eyebrow">5. Roadmap produit</p>
-              <h2>&#128640; Vision de plateforme</h2>
+              <h2>🚀 Vision de plateforme</h2>
             </div>
           </div>
           <div className="roadmap">
