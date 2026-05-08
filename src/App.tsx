@@ -1086,7 +1086,7 @@ function App() {
               Parcourez les alignements par manche et affichez-les ou ajustez-les manuellement.
             </p>
           </div>
-          <div className="stack compact" style={{ alignItems: 'flex-end' }}>
+          <div className="stack compact lineup-actions" style={{ alignItems: 'flex-end' }}>
             <button type="button" onClick={generateCurrentLineup}>
               ⚡ Générer l'alignement
             </button>
@@ -1193,7 +1193,8 @@ function App() {
                   ) : null}
                 </div>
               ) : null}
-              <table>
+              <div className="inning-table-wrap">
+                <table className="lineup-table">
                 <thead>
                   <tr>
                     <th>Position</th>
@@ -1238,7 +1239,8 @@ function App() {
                     )
                   })}
                 </tbody>
-              </table>
+                </table>
+              </div>
               <p className="bench-line">
                 🪑 Dugout: {inning.bench.map((playerId) => playerNames[playerId]).join(', ') || 'Aucun'}
               </p>

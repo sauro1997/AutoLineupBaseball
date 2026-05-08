@@ -6,6 +6,7 @@
 :root {
   --font-display: 'Oswald', 'Impact', 'Arial Narrow', sans-serif;
   --font-body: 'Inter', system-ui, -apple-system, sans-serif;
+  --font-size-hero-mobile: 1.55rem;
 
   /* ---- Stadium palette ---- */
   --color-bg:           #07111F;
