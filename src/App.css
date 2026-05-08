@@ -558,6 +558,17 @@ table {
   margin-top: 0.5rem;
 }
 
+.inning-table-wrap {
+  width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  margin-top: 0.4rem;
+}
+
+.lineup-table {
+  min-width: 360px;
+}
+
 thead tr {
   background: var(--color-surface-deep);
 }
@@ -794,6 +805,80 @@ td button {
 
   .hero-card h1 {
     font-size: 1.9rem;
+  }
+}
+
+@media (max-width: 768px) {
+  .app-shell {
+    gap: 1rem;
+    padding: 0.75rem;
+  }
+
+  .hero-card,
+  .panel,
+  .player-card,
+  .inning-card {
+    padding: 1rem;
+  }
+
+  .hero-card h1 {
+    font-size: 1.55rem;
+  }
+
+  .panel-heading,
+  .player-card-header,
+  .inning-card-header,
+  .match-history-item {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .hero-actions,
+  .lineup-actions {
+    min-width: 0;
+    width: 100%;
+  }
+
+  .hero-actions button,
+  .lineup-actions button,
+  .match-history-actions button {
+    width: 100%;
+  }
+
+  .player-card-header button {
+    width: 100%;
+  }
+
+  .match-history-input {
+    min-width: 0;
+  }
+
+  .match-history-actions {
+    width: 100%;
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .pitcher-change-controls {
+    align-items: stretch;
+  }
+
+  .pitcher-change-controls label {
+    flex: 1 1 100%;
+  }
+
+  button,
+  input,
+  select {
+    min-height: 44px;
+  }
+
+  th {
+    font-size: 0.64rem;
+  }
+
+  td {
+    padding: 0.45rem 0.55rem;
   }
 }
 
