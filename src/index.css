@@ -86,3 +86,15 @@ p {
   width: min(1440px, 100%);
   margin: 0 auto;
 }
+
+@media (max-width: 380px) {
+  body {
+    font-size: 14px;
+  }
+}
+
+@media (max-width: 320px) {
+  body {
+    font-size: 13px;
+  }
+}
