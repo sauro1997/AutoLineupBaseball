@@ -491,6 +491,7 @@ function App() {
   const [authPassword, setAuthPassword] = useState('')
   const [authLoading, setAuthLoading] = useState(false)
   const [authError, setAuthError] = useState<string | null>(null)
+  const [playerSearchQuery, setPlayerSearchQuery] = useState('')
   const [dbHydrationDone, setDbHydrationDone] = useState(!isSupabaseConfigured)
 
   function applyPersistedState(nextState: PersistedAppState) {
@@ -701,6 +702,41 @@ function App() {
       ),
     [currentMatchBenchTotals, interMatchBenchPriorityPlayers],
   )
+  const filteredPlayers = useMemo(() => {
+    const query = playerSearchQuery.trim().toLowerCase()
+    if (!query) return players
+
+    return players.filter((player) => {
+      const playerName = player.name.trim().toLowerCase()
+      return playerName.includes(query) || String(player.id).includes(query)
+    })
+  }, [playerSearchQuery, players])
+
+  function scrollToFirstInning() {
+    window.setTimeout(() => {
+      const inningOneCard = document.getElementById('inning-card-1')
+      const fallbackSection = document.getElementById('lineup-section')
+      const target = inningOneCard ?? fallbackSection
+      if (!target) return
+
+      target.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    }, 120)
+  }
+
+  function jumpToPlayerCard(playerId: number) {
+    const playerCard = document.getElementById(`player-card-${playerId}`)
+    if (!playerCard) return
+
+    playerCard.scrollIntoView({ behavior: 'smooth', block: 'start' })
+
+    window.setTimeout(() => {
+      const playerNameInput = document.getElementById(`player-name-input-${playerId}`) as HTMLInputElement | null
+      if (!playerNameInput) return
+
+      playerNameInput.focus()
+      playerNameInput.select()
+    }, 280)
+  }
 
   function updatePlayer(playerId: number, updater: (player: Player) => Player) {
     setPlayers((currentPlayers) => {
@@ -799,6 +835,7 @@ function App() {
         ? `Alignement généré avec l'équité des ${historyContextMatches.length} dernier(s) match(s) sélectionné(s).`
         : 'Alignement généré avec les paramètres actuels.',
     )
+    scrollToFirstInning()
   }
 
   function applyPitcherChangeFromInning(inning: number) {
@@ -1144,10 +1181,48 @@ function App() {
           </div>
 
           <div className="roster-list">
-            {players.map((player) => (
-              <section key={player.id} className="player-card">
+            <div className="roster-toolbar">
+              <label className="roster-search-field">
+                Rechercher un joueur
+                <input
+                  type="search"
+                  value={playerSearchQuery}
+                  onChange={(event) => setPlayerSearchQuery(event.target.value)}
+                  placeholder="Nom ou numéro"
+                  aria-label="Rechercher un joueur"
+                />
+              </label>
+              {playerSearchQuery ? (
+                <button type="button" className="ghost" onClick={() => setPlayerSearchQuery('')}>
+                  Effacer
+                </button>
+              ) : null}
+            </div>
+
+            {playerSearchQuery && filteredPlayers.length > 0 ? (
+              <div className="roster-quick-results" aria-label="Résultats rapides joueurs">
+                {filteredPlayers.map((player) => (
+                  <button
+                    key={`jump-${player.id}`}
+                    type="button"
+                    className="ghost roster-quick-result"
+                    onClick={() => jumpToPlayerCard(player.id)}
+                  >
+                    {player.name || `Joueur ${player.id}`}
+                  </button>
+                ))}
+              </div>
+            ) : null}
+
+            {filteredPlayers.length === 0 ? (
+              <p className="roster-search-empty">Aucun joueur trouvé pour cette recherche.</p>
+            ) : null}
+
+            {filteredPlayers.map((player) => (
+              <section id={`player-card-${player.id}`} key={player.id} className="player-card">
                 <div className="player-card-header">
                   <input
+                    id={`player-name-input-${player.id}`}
                     aria-label={`Nom ${player.id}`}
                     value={player.name}
                     onChange={(event) =>
@@ -1448,7 +1523,7 @@ function App() {
         </article>
       </section>
 
-      <section className="panel innings-print-section">
+      <section id="lineup-section" className="panel innings-print-section">
         <div className="panel-heading">
           <div>
             <TeamLogoBadge logoUrl={team.logoUrl} title="Section lineup" />
@@ -1530,7 +1605,7 @@ function App() {
 
         <div className="lineup-grid">
           {lineup.innings.map((inning) => (
-            <article key={inning.inning} className="inning-card">
+            <article id={`inning-card-${inning.inning}`} key={inning.inning} className="inning-card">
               <div className="inning-card-header">
                 <h3>Manche {inning.inning}</h3>
                 <span className="inning-score">Score {inning.score}</span>

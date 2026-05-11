@@ -188,6 +188,41 @@
   margin-top: 1.25rem;
 }
 
+.roster-toolbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.65rem;
+  align-items: end;
+}
+
+.roster-search-field {
+  margin: 0;
+}
+
+.roster-quick-results {
+  display: flex;
+  gap: 0.45rem;
+  overflow-x: auto;
+  padding-bottom: 0.2rem;
+  -webkit-overflow-scrolling: touch;
+}
+
+.roster-quick-result {
+  white-space: nowrap;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.72rem;
+  border-radius: 999px;
+}
+
+.roster-search-empty {
+  margin: 0;
+  padding: 0.7rem 0.9rem;
+  border-radius: 8px;
+  border: 1px dashed var(--color-border-bright);
+  color: var(--color-text-muted);
+  font-size: 0.85rem;
+}
+
 .lineup-grid {
   grid-template-columns: repeat(auto-fit, minmax(295px, 1fr));
 }
@@ -1047,6 +1082,26 @@ td button {
   .form-grid {
     grid-template-columns: 1fr;
     gap: 0.5rem;
+  }
+
+  .roster-toolbar {
+    grid-template-columns: 1fr;
+    align-items: stretch;
+    gap: 0.45rem;
+  }
+
+  .roster-quick-results {
+    gap: 0.35rem;
+  }
+
+  .roster-quick-result {
+    font-size: 0.68rem;
+    min-height: 34px;
+    padding: 0.4rem 0.65rem;
+  }
+
+  .roster-toolbar button {
+    width: 100%;
   }
 
   label {
