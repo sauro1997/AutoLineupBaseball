@@ -738,6 +738,17 @@ function App() {
     }, 280)
   }
 
+  function handlePlayerSearchKeyDown(event: React.KeyboardEvent<HTMLInputElement>) {
+    if (event.key !== 'Enter') return
+
+    event.preventDefault()
+    event.stopPropagation()
+
+    if (filteredPlayers.length > 0) {
+      jumpToPlayerCard(filteredPlayers[0].id)
+    }
+  }
+
   function updatePlayer(playerId: number, updater: (player: Player) => Player) {
     setPlayers((currentPlayers) => {
       const nextPlayers = currentPlayers.map((player) => (player.id === playerId ? updater(player) : player))
@@ -1188,6 +1199,7 @@ function App() {
                   type="search"
                   value={playerSearchQuery}
                   onChange={(event) => setPlayerSearchQuery(event.target.value)}
+                  onKeyDown={handlePlayerSearchKeyDown}
                   placeholder="Nom ou numéro"
                   aria-label="Rechercher un joueur"
                 />
