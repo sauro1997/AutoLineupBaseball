@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
 import { demoRules, demoTeam } from './data/demo'
 import {
@@ -27,6 +27,24 @@ import {
 import { isSupabaseConfigured } from './lib/supabaseClient'
 
 type GeneratedLineup = ReturnType<typeof generateLineupLocally>
+
+type BuildVersionPayload = {
+  buildId?: string
+}
+
+async function fetchBuildId() {
+  try {
+    const response = await fetch(`/version.json?t=${Date.now()}`, { cache: 'no-store' })
+    if (!response.ok) return null
+
+    const payload = (await response.json()) as BuildVersionPayload
+    if (typeof payload.buildId !== 'string' || payload.buildId.trim().length === 0) return null
+
+    return payload.buildId
+  } catch {
+    return null
+  }
+}
 
 function PosBadge({ position }: { position: Position }) {
   return <span className={`pos-badge pos-${position}`}>{position}</span>
@@ -435,6 +453,7 @@ function nextPlayerId(players: Player[]) {
 }
 
 function App() {
+  const buildIdRef = useRef<string | null>(null)
   const [initialState] = useState<PersistedAppState>(() => createEmptyPersistedState())
 
   const [team, setTeam] = useState<Team>(initialState.team)
@@ -576,6 +595,44 @@ function App() {
 
     setSelectedHistoryMatchId(undefined)
   }, [matchHistory, selectedHistoryMatchId])
+
+  useEffect(() => {
+    let disposed = false
+
+    async function checkForNewBuild() {
+      const remoteBuildId = await fetchBuildId()
+      if (!remoteBuildId || disposed) return
+
+      if (!buildIdRef.current) {
+        buildIdRef.current = remoteBuildId
+        return
+      }
+
+      if (buildIdRef.current !== remoteBuildId) {
+        window.location.reload()
+      }
+    }
+
+    void checkForNewBuild()
+
+    const intervalId = window.setInterval(() => {
+      void checkForNewBuild()
+    }, 60_000)
+
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        void checkForNewBuild()
+      }
+    }
+
+    document.addEventListener('visibilitychange', onVisibilityChange)
+
+    return () => {
+      disposed = true
+      window.clearInterval(intervalId)
+      document.removeEventListener('visibilitychange', onVisibilityChange)
+    }
+  }, [])
 
   useEffect(() => {
     if (selectedHistoryMatchId) return
