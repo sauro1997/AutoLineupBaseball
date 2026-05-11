@@ -939,15 +939,18 @@ function App() {
         <div>
           <p className="eyebrow">⚾ Field Manager — Baseball intelligent</p>
           <h1>AutoLineup Baseball</h1>
-          <TeamLogoBadge logoUrl={team.logoUrl} title={team.logoUrl ? 'Identité d’équipe active' : 'Ajoute ton logo pour personnaliser'} />
+          <TeamLogoBadge
+            logoUrl={team.logoUrl}
+            title={team.logoUrl ? (team.name.trim() ? team.name : 'Équipe sans nom') : 'Ajoute ton logo pour personnaliser'}
+          />
           <p className="lede">
             Gérez votre roster, configurez un match, générez un lineup optimisé par manche et ajustez-le
             manuellement sans perdre les contraintes clés.
           </p>
         </div>
         <TeamVisual logoUrl={team.logoUrl} size={96} />
-        <div className="stack compact" style={{ minWidth: '320px' }}>
-          <strong>Persistance Supabase</strong>
+        <div className="stack compact hero-auth-panel">
+          {/* <strong>Persistance Supabase</strong> */}
           {!isSupabaseConfigured ? (
             <p className="status-chip">Configure VITE_SUPABASE_URL et VITE_SUPABASE_ANON_KEY pour activer la sauvegarde DB.</p>
           ) : authUser ? (
@@ -1757,7 +1760,7 @@ function App() {
             <div>
               <h3>V1</h3>
               <ul>
-                <li>Persistance Supabase complète</li>
+                {/* <li>Persistance Supabase complète</li> */}
                 <li>Éditeur drag & drop avancé</li>
                 <li>Export PDF enrichi</li>
               </ul>

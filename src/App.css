@@ -7,6 +7,8 @@
   display: grid;
   gap: 1.5rem;
   padding: 2rem;
+  width: 100%;
+  max-width: 100%;
 }
 
 /* ---- Shared card surface ---- */
@@ -38,6 +40,10 @@
   border: 1px solid var(--color-border-bright);
   position: relative;
   overflow: hidden;
+}
+
+.hero-card > * {
+  min-width: 0;
 }
 
 /* Diagonal pinstripe overlay */
@@ -90,6 +96,10 @@
   min-width: 220px;
   position: relative;
   z-index: 1;
+}
+
+.hero-auth-panel {
+  min-width: 320px;
 }
 
 /* ---- Grid layouts ---- */
@@ -566,7 +576,7 @@ table {
 }
 
 .lineup-table {
-  min-width: 360px;
+  min-width: 320px;
 }
 
 thead tr {
@@ -852,6 +862,7 @@ td button {
   }
 
   .hero-actions,
+  .hero-auth-panel,
   .lineup-actions {
     min-width: 0;
     width: 100%;
@@ -907,6 +918,22 @@ td button {
   .app-shell {
     padding: 0.5rem;
     gap: 0.5rem;
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .grid,
+  .stack,
+  .hero-card,
+  .panel,
+  .player-card,
+  .inning-card,
+  .match-history-panel,
+  .inning-table-wrap,
+  .lineup-table {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
   }
 
   /* ---- Hero card ---- */
@@ -1129,7 +1156,7 @@ td button {
 
   td select {
     font-size: 0.8rem;
-    min-width: 80px;
+    min-width: 72px;
     max-width: 120px;
     padding: 0.3rem 0.4rem;
   }
