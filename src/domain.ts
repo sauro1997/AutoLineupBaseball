@@ -17,7 +17,7 @@ export type GeneralPositionGroup =
   | 'all_fields'
   | 'all_fields_catcher'
   | 'all_positions'
-export type FlexibilityLevel = 'starter' | 'regular' | 'bench' | 'utility' | 'absent'
+export type FlexibilityLevel = 'starter' | 'absent'
 
 export type FixedAssignment = {
   position: Position
@@ -99,10 +99,7 @@ export type PersistedAppState = {
 }
 
 export const flexibilityWeights: Record<FlexibilityLevel, number> = {
-  starter: 8,
-  regular: 5,
-  bench: 2,
-  utility: 6,
+  starter: 1,
   absent: -1000,
 }
 

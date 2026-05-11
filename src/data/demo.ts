@@ -28,7 +28,7 @@ export const demoPlayers: Player[] = [
     teamId: 1,
     // Champ droit principal, receveur de secours
     positions: { primary: ['RF'], secondary: ['C'], tertiary: [], general: ['outfield'] },
-    flexibilityLevel: 'regular',
+    flexibilityLevel: 'starter',
   },
   {
     id: 4,
@@ -36,7 +36,7 @@ export const demoPlayers: Player[] = [
     teamId: 1,
     // 2e but principal, 3e but secondaire, receveur de secours
     positions: { primary: ['2B'], secondary: ['3B'], tertiary: ['C'], general: ['infield_catcher'] },
-    flexibilityLevel: 'regular',
+    flexibilityLevel: 'starter',
   },
   {
     id: 5,
@@ -44,7 +44,7 @@ export const demoPlayers: Player[] = [
     teamId: 1,
     // 1re but principal, peut jouer au 3e
     positions: { primary: ['1B'], secondary: ['3B'], tertiary: [], general: ['infield'] },
-    flexibilityLevel: 'regular',
+    flexibilityLevel: 'starter',
   },
   {
     id: 6,
@@ -52,7 +52,7 @@ export const demoPlayers: Player[] = [
     teamId: 1,
     // 1re but alternatif, peut jouer au 2e
     positions: { primary: ['1B'], secondary: ['2B'], tertiary: [], general: ['infield'] },
-    flexibilityLevel: 'regular',
+    flexibilityLevel: 'starter',
   },
   {
     id: 7,
@@ -60,7 +60,7 @@ export const demoPlayers: Player[] = [
     teamId: 1,
     // 3e but principal, peut jouer à l'arrêt-court
     positions: { primary: ['3B'], secondary: ['SS'], tertiary: [], general: ['infield'] },
-    flexibilityLevel: 'regular',
+    flexibilityLevel: 'starter',
   },
   {
     id: 8,
@@ -68,7 +68,7 @@ export const demoPlayers: Player[] = [
     teamId: 1,
     // Arrêt-court principal
     positions: { primary: ['SS'], secondary: [], tertiary: [], general: ['infield'] },
-    flexibilityLevel: 'regular',
+    flexibilityLevel: 'starter',
   },
   {
     id: 9,
@@ -76,7 +76,7 @@ export const demoPlayers: Player[] = [
     teamId: 1,
     // Champ gauche — rotation au champ
     positions: { primary: ['LF'], secondary: [], tertiary: [], general: ['outfield'] },
-    flexibilityLevel: 'regular',
+    flexibilityLevel: 'starter',
   },
   {
     id: 10,
@@ -84,7 +84,7 @@ export const demoPlayers: Player[] = [
     teamId: 1,
     // Champ centre — rotation au champ
     positions: { primary: ['CF'], secondary: [], tertiary: [], general: ['outfield'] },
-    flexibilityLevel: 'regular',
+    flexibilityLevel: 'starter',
   },
 ]
 

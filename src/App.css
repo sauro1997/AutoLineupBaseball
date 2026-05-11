@@ -1160,3 +1160,85 @@ td button {
     padding-bottom: calc(5rem + env(safe-area-inset-bottom));
   }
 }
+
+/* ---- Print only innings section ---- */
+@media print {
+  @page {
+    size: auto;
+    margin: 12mm;
+  }
+
+  body {
+    background: #fff !important;
+    color: #000 !important;
+  }
+
+  .app-shell > * {
+    display: none !important;
+  }
+
+  .innings-print-section {
+    display: block !important;
+    border: none !important;
+    box-shadow: none !important;
+    background: transparent !important;
+    padding: 0 !important;
+  }
+
+  .innings-print-section .panel-heading,
+  .innings-print-section .match-history-panel,
+  .innings-print-section .mobile-sticky-bar,
+  .innings-print-section .pitcher-change-controls {
+    display: none !important;
+  }
+
+  .innings-print-section .lineup-grid {
+    display: grid !important;
+    grid-template-columns: 1fr !important;
+    gap: 0.6rem !important;
+  }
+
+  .innings-print-section .inning-card {
+    break-inside: avoid;
+    page-break-inside: avoid;
+    border: 1px solid #bbb !important;
+    box-shadow: none !important;
+    background: #fff !important;
+    color: #000 !important;
+    padding: 0.8rem !important;
+  }
+
+  .innings-print-section .inning-card h3,
+  .innings-print-section .inning-score,
+  .innings-print-section .bench-line,
+  .innings-print-section th,
+  .innings-print-section td,
+  .innings-print-section .notes-list li,
+  .innings-print-section .pos-badge {
+    color: #000 !important;
+  }
+
+  .innings-print-section .inning-score,
+  .innings-print-section .pos-badge,
+  .innings-print-section .bench-line {
+    border-color: #888 !important;
+    background: #fff !important;
+  }
+
+  .innings-print-section td:nth-child(3),
+  .innings-print-section th:nth-child(3),
+  .innings-print-section td button {
+    display: none !important;
+  }
+
+  .innings-print-section td select {
+    appearance: none;
+    -webkit-appearance: none;
+    border: none !important;
+    background: transparent !important;
+    color: #000 !important;
+    padding: 0 !important;
+    min-width: 0 !important;
+    font-size: 0.92rem !important;
+  }
+}

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import './App.css'
-import { demoPlayers, demoRules, demoTeam } from './data/demo'
+import { demoRules, demoTeam } from './data/demo'
 import {
   FIELD_POSITIONS,
   createOverrideKey,
@@ -16,16 +16,45 @@ import {
   type Team,
 } from './domain'
 import { generateLineupLocally, summarizeLineup } from './lib/lineupEngine'
+import {
+  loadRemoteState,
+  loginUser,
+  registerUser,
+  saveMatchHistoryEntry,
+  saveRemoteState,
+  type SessionUser,
+} from './lib/persistence'
+import { isSupabaseConfigured } from './lib/supabaseClient'
+
+type GeneratedLineup = ReturnType<typeof generateLineupLocally>
 
 function PosBadge({ position }: { position: Position }) {
   return <span className={`pos-badge pos-${position}`}>{position}</span>
 }
 
-function DiamondSVG() {
+function TeamVisual({ logoUrl, size = 96 }: { logoUrl?: string; size?: number }) {
+  if (logoUrl) {
+    return (
+      <img
+        src={logoUrl}
+        alt="Logo de l’équipe"
+        style={{
+          width: `${size}px`,
+          height: `${size}px`,
+          objectFit: 'cover',
+          borderRadius: '16px',
+          border: '1px solid rgba(255,255,255,0.24)',
+          boxShadow: '0 10px 24px rgba(0,0,0,0.2)',
+          flexShrink: 0,
+        }}
+      />
+    )
+  }
+
   return (
     <svg
-      width="96"
-      height="96"
+      width={size}
+      height={size}
       viewBox="0 0 96 96"
       fill="none"
       xmlns="http://www.w3.org/2000/svg"
@@ -47,9 +76,92 @@ function DiamondSVG() {
   )
 }
 
-const STORAGE_KEY = 'autolineup-state-v1'
+function TeamLogoBadge({ logoUrl, title }: { logoUrl?: string; title: string }) {
+  return (
+    <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.45rem', marginBottom: '0.35rem' }}>
+      <TeamVisual logoUrl={logoUrl} size={26} />
+      <span style={{ fontSize: '0.82rem', opacity: 0.9 }}>{title}</span>
+    </div>
+  )
+}
+
+const AUTH_STORAGE_KEY = 'autolineup-user-v1'
 const OUTFIELD_GROUP_VALUE = 'OUTFIELD_GROUP'
 const OUTFIELD_POSITIONS: Position[] = ['LF', 'CF', 'RF']
+
+function createEmptyPersistedState(): PersistedAppState {
+  return {
+    team: {
+      id: 0,
+      name: '',
+      logoUrl: '',
+    },
+    players: [],
+    rules: {
+      ...demoRules,
+      pitcherId: 0,
+      pitcherChanges: {},
+      fixedCenterField: false,
+      fixedCenterFieldPlayerId: undefined,
+      fixedCenterFieldPosition: 'CF',
+      fixedAssignments: [],
+      prioritizeCatcher: false,
+    },
+    manualOverrides: {},
+    lockedOverrides: [],
+    matchHistory: [],
+    selectedHistoryMatchId: undefined,
+    historyContextWindow: 1,
+  }
+}
+
+function generateLineupFromState(state: PersistedAppState): GeneratedLineup {
+  if (state.players.filter((player) => player.flexibilityLevel !== 'absent').length < FIELD_POSITIONS.length) {
+    return {
+      innings: [],
+      totals: {},
+    }
+  }
+
+  return generateLineupLocally(
+    state.players,
+    state.rules,
+    state.manualOverrides,
+    state.lockedOverrides,
+    toPreviousMatchContext(
+      getHistoryContextMatches(
+        state.matchHistory ?? [],
+        state.selectedHistoryMatchId,
+        state.historyContextWindow ?? 1,
+      ),
+    ),
+  )
+}
+
+function readStoredSessionUser(): SessionUser | null {
+  const raw = window.localStorage.getItem(AUTH_STORAGE_KEY)
+  if (!raw) return null
+
+  try {
+    const parsed = JSON.parse(raw) as Partial<SessionUser>
+    if (typeof parsed.id !== 'number' || typeof parsed.email !== 'string') return null
+    return {
+      id: parsed.id,
+      email: parsed.email,
+    }
+  } catch {
+    return null
+  }
+}
+
+function writeStoredSessionUser(user: SessionUser | null) {
+  if (!user) {
+    window.localStorage.removeItem(AUTH_STORAGE_KEY)
+    return
+  }
+
+  window.localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(user))
+}
 
 function positionLabel(position: Position): string {
   if (position === 'P') return 'P (Lanceur)'
@@ -142,18 +254,6 @@ function getPitcherForInning(rules: MatchRules, inning: number) {
 
 function encodeShareState(state: PersistedAppState) {
   return `#share=${window.btoa(encodeURIComponent(JSON.stringify(state)))}`
-}
-
-function decodeShareState(hash: string) {
-  if (!hash.startsWith('#share=')) return undefined
-
-  try {
-    const encoded = hash.replace('#share=', '')
-    const decoded = decodeURIComponent(window.atob(encoded))
-    return JSON.parse(decoded) as PersistedAppState
-  } catch {
-    return undefined
-  }
 }
 
 function normalizeNumericId(value: unknown) {
@@ -335,27 +435,7 @@ function nextPlayerId(players: Player[]) {
 }
 
 function App() {
-  const [initialState] = useState<PersistedAppState>(() => {
-    const sharedState = decodeShareState(window.location.hash)
-    if (sharedState) return normalizePersistedState(sharedState)
-
-    const persisted = window.localStorage.getItem(STORAGE_KEY)
-    if (persisted) {
-      try {
-        return normalizePersistedState(JSON.parse(persisted) as PersistedAppState)
-      } catch {
-        window.localStorage.removeItem(STORAGE_KEY)
-      }
-    }
-
-    return {
-      team: demoTeam,
-      players: demoPlayers,
-      rules: demoRules,
-      manualOverrides: {},
-      lockedOverrides: [],
-    }
-  })
+  const [initialState] = useState<PersistedAppState>(() => createEmptyPersistedState())
 
   const [team, setTeam] = useState<Team>(initialState.team)
   const [players, setPlayers] = useState<Player[]>(initialState.players)
@@ -385,36 +465,110 @@ function App() {
     () => players.filter((player) => isActivePlayer(player)),
     [players],
   )
-  const [lineup, setLineup] = useState(() =>
-    generateLineupLocally(
-      initialState.players,
-      initialState.rules,
-      initialState.manualOverrides,
-      initialState.lockedOverrides,
-      toPreviousMatchContext(
-        getHistoryContextMatches(
-          initialState.matchHistory ?? [],
-          initialState.selectedHistoryMatchId,
-          initialState.historyContextWindow ?? 1,
-        ),
-      ),
-    ),
-  )
+  const [lineup, setLineup] = useState(() => generateLineupFromState(initialState))
   const [status, setStatus] = useState('MVP prêt à générer un alignement intelligent.')
+  const [authUser, setAuthUser] = useState<SessionUser | null>(() => readStoredSessionUser())
+  const [authEmail, setAuthEmail] = useState('')
+  const [authPassword, setAuthPassword] = useState('')
+  const [authLoading, setAuthLoading] = useState(false)
+  const [authError, setAuthError] = useState<string | null>(null)
+  const [dbHydrationDone, setDbHydrationDone] = useState(!isSupabaseConfigured)
+
+  function applyPersistedState(nextState: PersistedAppState) {
+    setTeam(nextState.team)
+    setPlayers(nextState.players)
+    setRules(nextState.rules)
+    setManualOverrides(nextState.manualOverrides)
+    setLockedOverrides(nextState.lockedOverrides)
+    setMatchHistory(nextState.matchHistory ?? [])
+    setSelectedHistoryMatchId(nextState.selectedHistoryMatchId)
+    setHistoryContextWindow(nextState.historyContextWindow ?? 1)
+    setPitcherChangeSelections({})
+    setLineup(generateLineupFromState(nextState))
+  }
 
   useEffect(() => {
-    const state: PersistedAppState = {
-      team,
-      players,
-      rules,
-      manualOverrides,
-      lockedOverrides,
-      matchHistory,
-      selectedHistoryMatchId,
-      historyContextWindow,
+    if (!isSupabaseConfigured) return
+
+    if (!authUser) {
+      setDbHydrationDone(false)
+      return
     }
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state))
-  }, [team, players, rules, manualOverrides, lockedOverrides, matchHistory, selectedHistoryMatchId, historyContextWindow])
+
+    const currentUser = authUser
+
+    let cancelled = false
+
+    async function hydrateFromDb() {
+      setDbHydrationDone(false)
+
+      try {
+        const remoteState = await loadRemoteState(currentUser.id)
+
+        if (!cancelled && remoteState) {
+          const normalizedRemoteState = normalizePersistedState(remoteState)
+          applyPersistedState(normalizedRemoteState)
+          setStatus('Configuration chargée depuis Supabase.')
+        } else if (!cancelled) {
+          applyPersistedState(createEmptyPersistedState())
+          setStatus('Aucune configuration trouvée pour ce coach. Crée ton équipe et elle sera sauvegardée en base.')
+        }
+      } catch (error) {
+        if (!cancelled) {
+          const message = error instanceof Error ? error.message : 'Erreur inconnue Supabase.'
+          setStatus(`Erreur de chargement Supabase: ${message}`)
+        }
+      } finally {
+        if (!cancelled) {
+          setDbHydrationDone(true)
+        }
+      }
+    }
+
+    void hydrateFromDb()
+
+    return () => {
+      cancelled = true
+    }
+  }, [authUser])
+
+  useEffect(() => {
+    if (!isSupabaseConfigured) return
+    if (!authUser) return
+    if (!dbHydrationDone) return
+
+    const handle = window.setTimeout(() => {
+      const snapshot: PersistedAppState = {
+        team,
+        players,
+        rules,
+        manualOverrides,
+        lockedOverrides,
+        matchHistory,
+        selectedHistoryMatchId,
+        historyContextWindow,
+      }
+      void saveRemoteState(authUser.id, snapshot).catch((error) => {
+        const message = error instanceof Error ? error.message : 'Erreur inconnue Supabase.'
+        setStatus(`Erreur de sauvegarde Supabase: ${message}`)
+      })
+    }, 550)
+
+    return () => {
+      window.clearTimeout(handle)
+    }
+  }, [
+    authUser,
+    dbHydrationDone,
+    team,
+    players,
+    rules,
+    manualOverrides,
+    lockedOverrides,
+    matchHistory,
+    selectedHistoryMatchId,
+    historyContextWindow,
+  ])
 
   useEffect(() => {
     if (!selectedHistoryMatchId) return
@@ -510,7 +664,7 @@ function App() {
       name: 'Nouveau joueur',
       teamId: team.id,
       positions: { primary: ['1B'], secondary: [], tertiary: [], general: ['all_fields'] },
-      flexibilityLevel: 'bench',
+      flexibilityLevel: 'starter',
       excludedPositions: [],
     }
 
@@ -629,6 +783,14 @@ function App() {
     const entry = createMatchHistoryEntry(lineup, players, matchHistory.length)
     setMatchHistory((current) => [entry, ...current])
     setSelectedHistoryMatchId(entry.id)
+
+    if (isSupabaseConfigured && authUser) {
+      void saveMatchHistoryEntry(authUser.id, team, entry).catch((error) => {
+        const message = error instanceof Error ? error.message : 'Erreur inconnue Supabase.'
+        setStatus(`Erreur de sauvegarde du match dans Supabase: ${message}`)
+      })
+    }
+
     setStatus(`${entry.label} sauvegardé. Il peut maintenant servir de référence pour le prochain match.`)
   }
 
@@ -659,6 +821,72 @@ function App() {
     setStatus('Lien de match copié dans le presse-papiers.')
   }
 
+  async function handleRegister() {
+    if (!isSupabaseConfigured) {
+      setAuthError('Supabase n’est pas configuré dans les variables d’environnement.')
+      return
+    }
+
+    const email = authEmail.trim().toLowerCase()
+    if (!email || !authPassword) {
+      setAuthError('Email et mot de passe sont requis.')
+      return
+    }
+
+    setAuthLoading(true)
+    setAuthError(null)
+
+    try {
+      const user = await registerUser(email, authPassword)
+      writeStoredSessionUser(user)
+      setAuthUser(user)
+      setStatus(`Compte créé: ${user.email}`)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Erreur inconnue.'
+      setAuthError(`Impossible de créer le compte: ${message}`)
+    } finally {
+      setAuthLoading(false)
+    }
+  }
+
+  async function handleLogin() {
+    if (!isSupabaseConfigured) {
+      setAuthError('Supabase n’est pas configuré dans les variables d’environnement.')
+      return
+    }
+
+    const email = authEmail.trim().toLowerCase()
+    if (!email || !authPassword) {
+      setAuthError('Email et mot de passe sont requis.')
+      return
+    }
+
+    setAuthLoading(true)
+    setAuthError(null)
+
+    try {
+      const user = await loginUser(email, authPassword)
+      writeStoredSessionUser(user)
+      setAuthUser(user)
+      setStatus(`Connecté: ${user.email}`)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Erreur inconnue.'
+      setAuthError(`Connexion impossible: ${message}`)
+    } finally {
+      setAuthLoading(false)
+    }
+  }
+
+  function handleLogout() {
+    writeStoredSessionUser(null)
+    setAuthUser(null)
+    setAuthPassword('')
+    setAuthError(null)
+    applyPersistedState(createEmptyPersistedState())
+    setDbHydrationDone(!isSupabaseConfigured)
+    setStatus('Session locale fermée.')
+  }
+
   async function copySummary() {
     await window.navigator.clipboard.writeText(summary)
     setStatus('Résumé du lineup copié.')
@@ -669,19 +897,41 @@ function App() {
     setStatus('Utilisez le dialogue d’impression pour exporter en PDF.')
   }
 
-  function resetDemo() {
-    setTeam(demoTeam)
-    setPlayers(demoPlayers)
-    setRules(demoRules)
-    setManualOverrides({})
-    setLockedOverrides([])
-    setMatchHistory([])
-    setSelectedHistoryMatchId(undefined)
-    setHistoryContextWindow(1)
-    setLineup(generateLineupLocally(demoPlayers, demoRules, {}, []))
-    window.localStorage.removeItem(STORAGE_KEY)
-    setStatus('Démo restaurée.')
+  async function handleTeamLogoUpload(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0]
+    if (!file) return
+
+    if (!file.type.startsWith('image/')) {
+      setStatus('Le logo doit être une image valide.')
+      event.target.value = ''
+      return
+    }
+
+    const dataUrl = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader()
+      reader.onload = () => resolve(String(reader.result ?? ''))
+      reader.onerror = () => reject(new Error('Impossible de lire le fichier image.'))
+      reader.readAsDataURL(file)
+    }).catch(() => '')
+
+    if (!dataUrl) {
+      setStatus('Erreur pendant le chargement du logo.')
+      event.target.value = ''
+      return
+    }
+
+    setTeam((current) => ({ ...current, logoUrl: dataUrl }))
+    setStatus('Logo de l’équipe importé avec succès.')
+    event.target.value = ''
   }
+
+  function resetDemo() {
+    const emptyState = createEmptyPersistedState()
+    applyPersistedState(emptyState)
+    setStatus('Équipe vidée.')
+  }
+
+  const requiresAuthBeforeEditing = isSupabaseConfigured && !authUser
 
   return (
     <div className="app-shell">
@@ -689,12 +939,57 @@ function App() {
         <div>
           <p className="eyebrow">⚾ Field Manager — Baseball intelligent</p>
           <h1>AutoLineup Baseball</h1>
+          <TeamLogoBadge logoUrl={team.logoUrl} title={team.logoUrl ? 'Identité d’équipe active' : 'Ajoute ton logo pour personnaliser'} />
           <p className="lede">
             Gérez votre roster, configurez un match, générez un lineup optimisé par manche et ajustez-le
             manuellement sans perdre les contraintes clés.
           </p>
         </div>
-        <DiamondSVG />
+        <TeamVisual logoUrl={team.logoUrl} size={96} />
+        <div className="stack compact" style={{ minWidth: '320px' }}>
+          <strong>Persistance Supabase</strong>
+          {!isSupabaseConfigured ? (
+            <p className="status-chip">Configure VITE_SUPABASE_URL et VITE_SUPABASE_ANON_KEY pour activer la sauvegarde DB.</p>
+          ) : authUser ? (
+            <>
+              <p className="status-chip">Connecté: {authUser.email}</p>
+              <p className="status-chip">{dbHydrationDone ? 'Sync active' : 'Chargement DB en cours...'}</p>
+              <button type="button" className="ghost" onClick={handleLogout}>
+                Se déconnecter
+              </button>
+            </>
+          ) : (
+            <>
+              <label>
+                Email
+                <input
+                  type="email"
+                  value={authEmail}
+                  onChange={(event) => setAuthEmail(event.target.value)}
+                  placeholder="coach@equipe.com"
+                />
+              </label>
+              <label>
+                Mot de passe
+                <input
+                  type="password"
+                  value={authPassword}
+                  onChange={(event) => setAuthPassword(event.target.value)}
+                  placeholder="Mot de passe"
+                />
+              </label>
+              {authError ? <p className="status-chip">{authError}</p> : null}
+              <div className="stack compact" style={{ alignItems: 'flex-start' }}>
+                <button type="button" onClick={handleLogin} disabled={authLoading}>
+                  {authLoading ? 'Connexion...' : 'Se connecter'}
+                </button>
+                <button type="button" className="ghost" onClick={handleRegister} disabled={authLoading}>
+                  {authLoading ? 'Création...' : 'Créer un compte'}
+                </button>
+              </div>
+            </>
+          )}
+        </div>
         <div className="hero-actions">
           <button type="button" onClick={copyShareLink}>
             🔗 Copier le lien du match
@@ -718,10 +1013,26 @@ function App() {
         </div>
       </header>
 
+      {requiresAuthBeforeEditing ? (
+        <section className="panel">
+          <div className="panel-heading">
+            <div>
+              <p className="eyebrow">🔒 Accès requis</p>
+              <h2>Connecte-toi pour modifier l'équipe</h2>
+              <p style={{ fontSize: '0.9rem', color: 'var(--muted, #666)', marginTop: '0.5rem' }}>
+                La modification des joueurs, règles et lineups est verrouillée jusqu'à la connexion.
+              </p>
+            </div>
+          </div>
+        </section>
+      ) : (
+        <>
+
       <section className="grid two-columns">
         <article className="panel">
           <div className="panel-heading">
             <div>
+              <TeamLogoBadge logoUrl={team.logoUrl} title="Section équipe" />
               <p className="eyebrow">⚾ Étape 1</p>
               <h2>Configurer votre équipe</h2>
               <p style={{ fontSize: '0.85rem', color: 'var(--muted, #666)', marginTop: '0.5rem' }}>
@@ -742,13 +1053,34 @@ function App() {
               />
             </label>
             <label>
-              Logo URL (optionnel)
+              Upload logo (image)
               <input
-                value={team.logoUrl ?? ''}
-                onChange={(event) => setTeam((current) => ({ ...current, logoUrl: event.target.value }))}
-                placeholder="https://..."
+                type="file"
+                accept="image/*"
+                onChange={(event) => {
+                  void handleTeamLogoUpload(event)
+                }}
               />
             </label>
+            {team.logoUrl ? (
+              <div className="stack compact" style={{ alignItems: 'flex-start' }}>
+                <img
+                  src={team.logoUrl}
+                  alt="Logo de l’équipe"
+                  style={{ width: '80px', height: '80px', objectFit: 'cover', borderRadius: '8px' }}
+                />
+                <button
+                  type="button"
+                  className="ghost"
+                  onClick={() => {
+                    setTeam((current) => ({ ...current, logoUrl: '' }))
+                    setStatus('Logo retiré.')
+                  }}
+                >
+                  Retirer le logo
+                </button>
+              </div>
+            ) : null}
           </div>
 
           <div className="roster-list">
@@ -778,11 +1110,8 @@ function App() {
                         }))
                       }
                     >
-                      <option value="starter">starter</option>
-                      <option value="regular">régulier</option>
-                      <option value="bench">remplaçant</option>
-                      <option value="utility">utility</option>
-                      <option value="absent">absent</option>
+                      <option value="starter">Starter</option>
+                      <option value="absent">Absent</option>
                     </select>
                   </label>
                   <label>
@@ -948,10 +1277,13 @@ function App() {
         <article className="panel">
           <div className="panel-heading">
             <div>
+              <TeamLogoBadge logoUrl={team.logoUrl} title="Section match" />
               <p className="eyebrow">⚙️ Étape 2</p>
               <h2>Configurer le match</h2>
               <p style={{ fontSize: '0.85rem', color: 'var(--muted, #666)', marginTop: '0.5rem' }}>
-                Définissez les règles : manches, lanceur partant, rotation, etc.
+                Définissez les règles : manches, lanceur partant, rotation, etc. Après avoir généré l'alignement,
+                vous pouvez changer le lanceur à tout moment dans la section des manches et l'alignement est
+                recalculé automatiquement.
               </p>
             </div>
           </div>
@@ -1053,33 +1385,13 @@ function App() {
             </label>
           </div>
 
-          <div className="toggle-list">
-            <label className="toggle">
-              <input
-                type="checkbox"
-                checked={rules.prioritizeCatcher}
-                onChange={(event) =>
-                  setRules((current) => ({ ...current, prioritizeCatcher: event.target.checked }))
-                }
-              />
-              Receveur prioritaire
-            </label>
-          </div>
-
-          <div className="rule-summary">
-            <h3>Contraintes gérées</h3>
-            <ul>
-                <li>Hard constraints: pitcher dédié, locks globaux, overrides verrouillés.</li>
-              <li>Soft constraints: scoring primary → tertiary, équilibre temps de jeu, retour du banc.</li>
-              <li>Fallback: catégorie générale si aucune position stricte n’est disponible.</li>
-            </ul>
-          </div>
         </article>
       </section>
 
-      <section className="panel">
+      <section className="panel innings-print-section">
         <div className="panel-heading">
           <div>
+            <TeamLogoBadge logoUrl={team.logoUrl} title="Section lineup" />
             <p className="eyebrow">📋 Étape 3</p>
             <h2>Générer et ajuster votre lineup</h2>
             <p style={{ fontSize: '0.85rem', color: 'var(--muted, #666)', marginTop: '0.5rem' }}>
@@ -1308,9 +1620,6 @@ function App() {
                 <strong>Max manches au banc par match</strong> : Limite du total de manches qu'un joueur peut passer
                 au banc sur l'ensemble du match. Une fois la limite atteinte, il devient prioritaire pour jouer.
               </li>
-              <li>
-                <strong>Receveur prioritaire</strong> : Si activé, le moteur donne un bonus au receveur. Utile pour s'assurer que le receveur titulaire joue.
-              </li>
             </ul>
           </div>
 
@@ -1346,7 +1655,6 @@ function App() {
             <ul style={{ fontSize: '0.9rem', lineHeight: '1.6' }}>
               <li>Définissez Primary pour la meilleure position, Secondary pour l'alternative, et Tertiary pour les cas d'urgence.</li>
               <li>Utilisez "Lock global" seulement si un joueur ne peut jouer que d'une seule position.</li>
-              <li>Mettez "Receveur prioritaire" pour s'assurer que les bons receveurs jouent.</li>
               <li>Niveau "Starter" pour les titulaires, "Régulier" pour les réguliers, "Remplaçant" pour les suppléants.</li>
               <li>Le groupe de positions "Partout" est un filet de secours : privilégiez les positions spécifiques.</li>
             </ul>
@@ -1358,6 +1666,7 @@ function App() {
         <article className="panel">
           <div className="panel-heading">
             <div>
+              <TeamLogoBadge logoUrl={team.logoUrl} title="Analyse équipe" />
               <p className="eyebrow">📊 Étape 4</p>
               <h2>Voir les résultats</h2>
               <p style={{ fontSize: '0.85rem', color: 'var(--muted, #666)', marginTop: '0.5rem' }}>
@@ -1397,6 +1706,7 @@ function App() {
         <article className="panel">
           <div className="panel-heading">
             <div>
+              <TeamLogoBadge logoUrl={team.logoUrl} title="Vision produit" />
               <p className="eyebrow">🚀 Bonus</p>
               <h2>Roadmap produit</h2>
             </div>
@@ -1439,6 +1749,9 @@ function App() {
           💾 Sauvegarder
         </button>
       </div>
+
+        </>
+      )}
     </div>
   )
 }
