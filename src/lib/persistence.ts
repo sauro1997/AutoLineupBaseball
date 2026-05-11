@@ -1,4 +1,4 @@
-import type { MatchHistoryEntry, MatchRules, PersistedAppState, Player, Team } from '../domain'
+import type { FlexibilityLevel, MatchHistoryEntry, MatchRules, PersistedAppState, Player, Team } from '../domain'
 import { demoRules, demoTeam } from '../data/demo'
 import { supabase } from './supabaseClient'
 

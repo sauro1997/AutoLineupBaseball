@@ -1579,27 +1579,36 @@ function App() {
             <h3>⚾ Profil du joueur</h3>
             <ul style={{ fontSize: '0.9rem', lineHeight: '1.6' }}>
               <li>
-                <strong>Niveau</strong> : Priorité du joueur. "Starter" → toujours jouer, "Régulier" → jouer régulièrement, "Remplaçant" → au banc plus souvent, "Utility" → très flexible.
-              </li>
-              <li>
-                <strong>Lock global</strong> : Si défini, le joueur est limité a cette position uniquement. Si
-                "banc autorise" est sur Non, il est force de jouer cette position a chaque manche. Si "banc autorise"
-                est sur Oui, il peut etre mis au banc mais ne jouera jamais une autre position.
-              </li>
-              <li>
-                <strong>Primary / Secondary / Tertiary</strong> : Positions où le joueur peut jouer, avec des bonus de score décroissants (100 / 70 / 40). Le moteur préfère Primary, puis Secondary, etc.
-              </li>
-              <li>
-                <strong>Groupe de positions (fallback)</strong> : Si aucune position spécifique n'est libre, le moteur peut utiliser ce groupe avec un faible score (30). Options :
-                <ul style={{ marginTop: '0.5rem' }}>
-                  <li>Intérieur : 1B, 2B, 3B, SS</li>
-                  <li>Extérieur : LF, CF, RF</li>
-                  <li>Outfield + Catcher</li>
-                  <li>Intérieur + Catcher</li>
-                  <li>Partout (sans lanceur ni catcher)</li>
-                  <li>Partout + Catcher (sans lanceur)</li>
-                  <li>Partout + Catcher + Lanceur (vraiment toutes les positions)</li>
+                <strong>Niveau</strong> : Priorité du joueur dans le calcul.
+                <ul style={{ marginTop: '0.3rem', marginBottom: '0' }}>
+                  <li><strong>Starter</strong> : Joueur titulaire, bonus de flexibilité appliqué</li>
+                  <li><strong>Absent</strong> : Joueur indisponible, exclu du calcul</li>
                 </ul>
+              </li>
+              <li>
+                <strong>Lock global</strong> : Si défini, le joueur est limité à cette position uniquement.
+                <ul style={{ marginTop: '0.3rem', marginBottom: '0' }}>
+                  <li><strong>Banc interdit</strong> (No) : Le joueur doit jouer cette position à chaque manche</li>
+                  <li><strong>Banc autorisé</strong> (Yes) : Le joueur peut être au banc, mais ne jouera jamais une autre position</li>
+                </ul>
+              </li>
+              <li>
+                <strong>Primary / Secondary / Tertiary</strong> : Positions où le joueur peut jouer, avec des scores de compatibilité décroissants (100 / 70 / 40). Le moteur préfère Primary, puis Secondary, puis Tertiary.
+              </li>
+              <li>
+                <strong>Groupe de positions (fallback)</strong> : Si aucune position spécifique n'est libre, le moteur peut utiliser ce groupe avec un score faible (30). Options :
+                <ul style={{ marginTop: '0.5rem' }}>
+                  <li><strong>Infield</strong> : 1B, 2B, 3B, SS</li>
+                  <li><strong>Outfield</strong> : LF, CF, RF</li>
+                  <li><strong>Outfield + Catcher</strong> : LF, CF, RF, C</li>
+                  <li><strong>Infield + Catcher</strong> : 1B, 2B, 3B, SS, C</li>
+                  <li><strong>All Fields</strong> : Toutes positions sauf P et C</li>
+                  <li><strong>All Fields + Catcher</strong> : Toutes positions sauf P</li>
+                  <li><strong>All Positions</strong> : P, C, 1B, 2B, 3B, SS, LF, CF, RF (vraiment toutes)</li>
+                </ul>
+              </li>
+              <li>
+                <strong>Positions exclues</strong> : Positions où le joueur ne peut JAMAIS jouer (incompatibilité totale). Utile pour les joueurs spécialisés.
               </li>
             </ul>
           </div>
@@ -1611,14 +1620,19 @@ function App() {
                 <strong>Nombre de manches</strong> : Durée totale du match (ex: 6 manches).
               </li>
               <li>
-                <strong>Lanceur</strong> : ID du lanceur principal. Le moteur le place au monticule à chaque manche (sauf si max manches atteint).
+                <strong>Lanceur principal</strong> : Le joueur qui lance au début du match. Le moteur le place au monticule à chaque manche jusqu'à atteindre sa limite d'innings.
               </li>
               <li>
-                <strong>Manches max du lanceur</strong> : Limite de manches que le lanceur peut lancer avant d'être remplacé.
+                <strong>Manches max du lanceur</strong> : Limite d'innings que le lanceur principal peut lancer avant d'être remplacé (ex: 4 manches max).
               </li>
               <li>
-                <strong>Max manches au banc par match</strong> : Limite du total de manches qu'un joueur peut passer
-                au banc sur l'ensemble du match. Une fois la limite atteinte, il devient prioritaire pour jouer.
+                <strong>Changements de lanceur</strong> : Définies une fois le lineup généré. Permets de programmer des changements de lanceur à des manches spécifiques.
+              </li>
+              <li>
+                <strong>Max manches consécutives au banc</strong> : Seuil d'inactivité. Une fois qu'un joueur a passé ce nombre de manches au banc, il devient prioritaire pour jouer à la prochaine manche disponible.
+              </li>
+              <li>
+                <strong>Priorité receveur</strong> : Si activée, donne un bonus aux joueurs spécialisés au poste de C (leur Primary ou Secondary position inclut C).
               </li>
             </ul>
           </div>
@@ -1626,37 +1640,57 @@ function App() {
           <div style={{ marginBottom: '1.5rem' }}>
             <h3>🧮 Comment le score de lineup est calculé</h3>
             <p style={{ fontSize: '0.9rem', marginBottom: '0.8rem' }}>
-              Pour chaque joueur à chaque position à chaque manche, le moteur calcule un score global :
+              Pour chaque joueur à chaque position à chaque manche, le moteur calcule un score combinant plusieurs facteurs :
             </p>
             <ol style={{ fontSize: '0.9rem', lineHeight: '1.8', paddingLeft: '1.5rem' }}>
               <li>
-                <strong>Compatibilité position</strong> (100 Primary, 70 Secondary, 40 Tertiary, 30 Groupe, -1000 incompatible)
+                <strong>Score de compatibilité position</strong> (base) :
+                <ul style={{ marginTop: '0.3rem', marginBottom: '0.3rem' }}>
+                  <li>Primary : +100</li>
+                  <li>Secondary : +70</li>
+                  <li>Tertiary : +40</li>
+                  <li>Groupe de positions : +30</li>
+                  <li>Incompatible/Exclu : -1000</li>
+                </ul>
               </li>
               <li>
-                <strong>Bonus flexibilité</strong> : +8 (Starter), +6 (Utility), +5 (Régulier), +2 (Remplaçant)
+                <strong>Bonus flexibilité</strong> : Défini une seule fois par joueur
+                <ul style={{ marginTop: '0.3rem', marginBottom: '0.3rem' }}>
+                  <li>Starter : +1</li>
+                  <li>Absent : -1000 (exclu du calcul)</li>
+                </ul>
               </li>
               <li>
-                <strong>Bonus équilibre temps de jeu</strong> : Plus un joueur a joué, moins il a de bonus
+                <strong>Bonus équilibre temps de jeu</strong> : (manches restantes - manches jouées) × 8
+                <br/><span style={{ fontSize: '0.85rem' }}>Plus un joueur a joué, moins il a de bonus</span>
               </li>
               <li>
                 <strong>Bonus retour du banc</strong> : +18 si le joueur était au banc à la manche précédente
               </li>
               <li>
-                <strong>Pénalité répétition</strong> : -4 par répétition si le joueur joue la même position que la manche précédente
+                <strong>Bonus équité inter-match</strong> : Basé sur le temps de banc des matchs précédents (bonus/pénalité jusqu'à ±120)
+              </li>
+              <li>
+                <strong>Pénalité répétition position</strong> : -(nombre de fois répétée × 4) si le joueur garde la même position que la manche précédente
+              </li>
+              <li>
+                <strong>Bonus priorité receveur</strong> (si activé) : +25 pour les spécialistes du poste C, -25 sinon
               </li>
             </ol>
             <p style={{ fontSize: '0.85rem', marginTop: '0.8rem', color: 'var(--muted, #666)' }}>
-              Le moteur cherche la meilleure combinaison de 9 joueurs (1 par position) qui maximise le score total, tout en respectant les contraintes (pitcher dédié, locks globaux, etc).
+              Le moteur cherche la meilleure combinaison de 9 joueurs (1 par position) qui maximise le score total, tout en respectant les contraintes (pitcher dédié, locks globaux, max innings au banc, etc). La recherche est optimisée pour trouver rapidement une solution satisfaisante.
             </p>
           </div>
 
           <div>
             <h3>💡 Conseils d'utilisation</h3>
             <ul style={{ fontSize: '0.9rem', lineHeight: '1.6' }}>
-              <li>Définissez Primary pour la meilleure position, Secondary pour l'alternative, et Tertiary pour les cas d'urgence.</li>
-              <li>Utilisez "Lock global" seulement si un joueur ne peut jouer que d'une seule position.</li>
-              <li>Niveau "Starter" pour les titulaires, "Régulier" pour les réguliers, "Remplaçant" pour les suppléants.</li>
-              <li>Le groupe de positions "Partout" est un filet de secours : privilégiez les positions spécifiques.</li>
+              <li>Définissez <strong>Primary</strong> pour la meilleure position, <strong>Secondary</strong> pour l'alternative, et <strong>Tertiary</strong> pour les cas d'urgence.</li>
+              <li>Utilisez <strong>Lock global</strong> seulement si un joueur ne peut jouer que d'une seule position (ex: lanceur spécialisé).</li>
+              <li>Niveau <strong>Starter</strong> pour les titulaires, <strong>Absent</strong> pour les indisponibles.</li>
+              <li>Le groupe de positions est un filet de secours : privilégiez toujours les positions spécifiques (Primary/Secondary/Tertiary).</li>
+              <li>Pour une équité optimale inter-match, utilisez l'historique des matchs et le contexte de fenêtre pour mémoriser le temps de jeu passé.</li>
+              <li><strong>Positions exclues</strong> utiles pour forcer certaines restrictions (ex: un lanceur ne peut pas jouer en champ).</li>
             </ul>
           </div>
         </div>
