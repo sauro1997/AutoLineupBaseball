@@ -1429,6 +1429,16 @@ function App() {
           </div>
         </article>
       </section>
+
+      {/* Sticky bottom bar — visible only on mobile via CSS */}
+      <div className="mobile-sticky-bar">
+        <button type="button" onClick={generateCurrentLineup}>
+          ⚡ Générer
+        </button>
+        <button type="button" className="ghost" onClick={saveCurrentMatch}>
+          💾 Sauvegarder
+        </button>
+      </div>
     </div>
   )
 }
