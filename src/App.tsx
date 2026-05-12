@@ -1926,8 +1926,8 @@ function App() {
         <button type="button" onClick={generateCurrentLineup}>
           ⚡ Générer
         </button>
-        <button type="button" className="ghost" onClick={saveCurrentMatch}>
-          💾 Sauvegarder
+        <button type="button" className="ghost" onClick={scrollToFirstInning}>
+          👀 Voir match
         </button>
       </div>
 
