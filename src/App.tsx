@@ -5,6 +5,7 @@ import {
   FIELD_POSITIONS,
   createOverrideKey,
   isPosition,
+  type ExportedLineup,
   type FlexibilityLevel,
   type MatchHistoryEntry,
   type ManualOverrideMap,
@@ -15,7 +16,16 @@ import {
   type PreviousMatchContext,
   type Team,
 } from './domain'
-import { generateLineupLocally, summarizeLineup } from './lib/lineupEngine'
+import {
+  buildImportPreview,
+  createMissingPlayersFromLineup,
+  exportLineupToCSV,
+  exportLineupToJSON,
+  generateLineupLocally,
+  summarizeLineup,
+  validateLineupJSON,
+  type ImportLineupPreview,
+} from './lib/lineupEngine'
 import {
   loadRemoteState,
   loginUser,
@@ -493,6 +503,9 @@ function App() {
   const [authError, setAuthError] = useState<string | null>(null)
   const [playerSearchQuery, setPlayerSearchQuery] = useState('')
   const [dbHydrationDone, setDbHydrationDone] = useState(!isSupabaseConfigured)
+  const [importPreview, setImportPreview] = useState<ImportLineupPreview | null>(null)
+  const [importLineupData, setImportLineupData] = useState<ExportedLineup | null>(null)
+  const [importError, setImportError] = useState<string | null>(null)
 
   function applyPersistedState(nextState: PersistedAppState) {
     setTeam(nextState.team)
@@ -1036,6 +1049,109 @@ function App() {
     setStatus('Équipe vidée.')
   }
 
+  function downloadFile(content: string, fileName: string, mimeType: string) {
+    const blob = new Blob([content], { type: mimeType })
+    const url = window.URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = fileName
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    window.URL.revokeObjectURL(url)
+  }
+
+  function handleExportLineupJSON() {
+    if (lineup.innings.length === 0) {
+      setStatus(`Impossible d'exporter: aucun alignement généré.`)
+      return
+    }
+
+    const exported = exportLineupToJSON(lineup, team, players, rules.inningsCount)
+    const json = JSON.stringify(exported, null, 2)
+    const fileName = `lineup_${team.name.replace(/\s+/g, '_')}_${new Date().toISOString().split('T')[0]}.json`
+    downloadFile(json, fileName, 'application/json')
+    setStatus('Alignement exporté en JSON.')
+  }
+
+  function handleExportLineupCSV() {
+    if (lineup.innings.length === 0) {
+      setStatus(`Impossible d'exporter: aucun alignement généré.`)
+      return
+    }
+
+    const csv = exportLineupToCSV(lineup, players)
+    const fileName = `lineup_${team.name.replace(/\s+/g, '_')}_${new Date().toISOString().split('T')[0]}.csv`
+    downloadFile(csv, fileName, 'text/csv')
+    setStatus('Alignement exporté en CSV.')
+  }
+
+  function handleImportLineupFile(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0]
+    if (!file) return
+
+    const reader = new FileReader()
+    reader.onload = (e) => {
+      try {
+        const content = e.target?.result as string
+        const parsed = JSON.parse(content)
+        const validation = validateLineupJSON(parsed)
+
+        if (!validation.valid || !validation.parsed) {
+          setImportError(validation.error || `Format d'alignement invalide.`)
+          setImportPreview(null)
+          setImportLineupData(null)
+          return
+        }
+
+        const preview = buildImportPreview(validation.parsed, players)
+        setImportLineupData(validation.parsed)
+        setImportPreview(preview)
+        setImportError(null)
+        setStatus(`Alignement chargé: ${preview.playersToCreate} joueur(s) à créer.`)
+      } catch (error) {
+        setImportError(
+          error instanceof Error ? error.message : 'Erreur lors de la lecture du fichier.',
+        )
+        setImportPreview(null)
+        setImportLineupData(null)
+      }
+    }
+
+    reader.readAsText(file)
+    event.target.value = ''
+  }
+
+  function applyImportedLineup() {
+    if (!importLineupData || !importPreview) {
+      setStatus('Aucun alignement à importer.')
+      return
+    }
+
+    const newPlayers = createMissingPlayersFromLineup(importLineupData, players)
+    const nextPlayers = [...players, ...newPlayers].map((p) => ({
+      ...p,
+      teamId: p.teamId || team.id,
+    }))
+
+    setPlayers(nextPlayers)
+    setLineup(importLineupData.lineup)
+    setStatus(
+      `Alignement importé avec succès. ${newPlayers.length} joueur(s) créé(s).`,
+    )
+
+    setImportPreview(null)
+    setImportLineupData(null)
+    setImportError(null)
+  }
+
+  function cancelImport() {
+    setImportPreview(null)
+    setImportLineupData(null)
+    setImportError(null)
+    setStatus('Import annulé.')
+  }
+
   const requiresAuthBeforeEditing = isSupabaseConfigured && !authUser
 
   return (
@@ -1105,8 +1221,24 @@ function App() {
           <button type="button" onClick={copySummary}>
             📋 Copier le résumé
           </button>
+          <button type="button" onClick={handleExportLineupJSON}>
+            💾 Exporter Alignement (JSON)
+          </button>
+          <button type="button" onClick={handleExportLineupCSV}>
+            📊 Exporter Alignement (CSV)
+          </button>
+          <button type="button" onClick={() => document.getElementById('import-lineup-input')?.click()}>
+            📂 Importer Alignement
+          </button>
+          <input
+            id="import-lineup-input"
+            type="file"
+            accept=".json"
+            onChange={handleImportLineupFile}
+            style={{ display: 'none' }}
+          />
           <button type="button" onClick={printLineup}>
-            🖨️ Export PDF
+            🖨️ Imprimer Manches PDF
           </button>
           <button type="button" className="ghost" onClick={resetDemo}>
             ↺ Réinitialiser la démo
@@ -1130,6 +1262,63 @@ function App() {
               <p style={{ fontSize: '0.9rem', color: 'var(--muted, #666)', marginTop: '0.5rem' }}>
                 La modification des joueurs, règles et lineups est verrouillée jusqu'à la connexion.
               </p>
+            </div>
+          </div>
+        </section>
+      ) : importPreview ? (
+        <section className="panel" style={{ backgroundColor: 'rgba(33, 150, 243, 0.05)', borderColor: 'rgba(33, 150, 243, 0.3)' }}>
+          <div className="panel-heading">
+            <div>
+              <p className="eyebrow">📂 Aperçu d'import</p>
+              <h2>Voulez-vous importer cet alignement ?</h2>
+            </div>
+          </div>
+
+          <div className="stack">
+            <div style={{ paddingLeft: '1rem', borderLeft: '3px solid rgba(33, 150, 243, 0.5)' }}>
+              <p>
+                <strong>Équipe:</strong> {importPreview.teamName}
+              </p>
+              <p>
+                <strong>Manches:</strong> {importPreview.inningsCount}
+              </p>
+              <p>
+                <strong>Joueurs dans l'alignement:</strong> {importPreview.playersInLineup}
+              </p>
+              {importPreview.playersToCreate > 0 && (
+                <>
+                  <p style={{ marginTop: '0.5rem', color: 'var(--warning-color, #ff9800)' }}>
+                    <strong>⚠️ {importPreview.playersToCreate} joueur(s) seront créé(s):</strong>
+                  </p>
+                  <ul style={{ marginLeft: '1rem', marginTop: '0.25rem' }}>
+                    {importPreview.createdPlayersNames.map((name, idx) => (
+                      <li key={idx}>{name}</li>
+                    ))}
+                  </ul>
+                </>
+              )}
+            </div>
+
+            {importError && (
+              <div style={{ padding: '0.75rem', backgroundColor: 'rgba(244, 67, 54, 0.1)', borderRadius: '4px', color: '#d32f2f' }}>
+                ❌ {importError}
+              </div>
+            )}
+
+            <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
+              <button
+                type="button"
+                className="ghost"
+                onClick={cancelImport}
+              >
+                Annuler
+              </button>
+              <button
+                type="button"
+                onClick={applyImportedLineup}
+              >
+                ✅ Importer l'alignement
+              </button>
             </div>
           </div>
         </section>

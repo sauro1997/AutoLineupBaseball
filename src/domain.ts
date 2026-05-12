@@ -87,6 +87,23 @@ export type MatchHistoryEntry = {
 
 export type ManualOverrideMap = Partial<Record<string, number>>
 
+export type ExportedLineup = {
+  version: string
+  exported_at: string
+  team: {
+    id: number
+    name: string
+  }
+  inningsCount: number
+  players: Array<{
+    id: number
+    name: string
+    positions: Player['positions']
+    flexibilityLevel: FlexibilityLevel
+  }>
+  lineup: LineupResult
+}
+
 export type PersistedAppState = {
   team: Team
   players: Player[]

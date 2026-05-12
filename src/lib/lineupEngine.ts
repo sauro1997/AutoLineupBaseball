@@ -3,6 +3,7 @@ import {
   POSITION_SCORES,
   createOverrideKey,
   flexibilityWeights,
+  type ExportedLineup,
   type GeneralPositionGroup,
   type InningAssignment,
   type LineupResult,
@@ -11,6 +12,7 @@ import {
   type Player,
   type Position,
   type PreviousMatchContext,
+  type Team,
 } from '../domain'
 
 type PlayerState = {
@@ -337,9 +339,13 @@ function generateBestAssignments(
 
       if (selectedPlayerId === undefined) {
         // Aucune solution compatible pour cette position avec les contraintes actuelles.
+        const partialScore = Object.entries(fallbackAssignments).reduce(
+          (sum, [pos, pid]) => sum + getCompatibilityScore(playersById[pid], pos as Position),
+          0,
+        )
         return {
           assignments: normalState.bestAssignments ?? ({} as Record<Position, number>),
-          score: 0,
+          score: partialScore,
           requiredOnFieldApplied: false,
         }
       }
@@ -348,9 +354,14 @@ function generateBestAssignments(
       availablePlayers.delete(selectedPlayerId)
     }
 
+    const fallbackScore = Object.entries(fallbackAssignments).reduce(
+      (sum, [pos, pid]) => sum + getCompatibilityScore(playersById[pid], pos as Position),
+      0,
+    )
+
     return {
       assignments: fallbackAssignments,
-      score: 0,
+      score: fallbackScore,
       requiredOnFieldApplied: false,
     }
   }
@@ -560,4 +571,124 @@ export function summarizeLineup(lineup: LineupResult, players: Player[]) {
       return `Manche ${inning.inning} — ${assignments} — Banc: ${bench}`
     })
     .join('\n')
+}
+
+export function exportLineupToJSON(
+  lineup: LineupResult,
+  team: Team,
+  players: Player[],
+  inningsCount: number,
+): ExportedLineup {
+  return {
+    version: '1.0',
+    exported_at: new Date().toISOString(),
+    team: {
+      id: team.id,
+      name: team.name,
+    },
+    inningsCount,
+    players: players.map((p) => ({
+      id: p.id,
+      name: p.name,
+      positions: p.positions,
+      flexibilityLevel: p.flexibilityLevel,
+    })),
+    lineup,
+  }
+}
+
+export function exportLineupToCSV(lineup: LineupResult, players: Player[]): string {
+  const playerNames = Object.fromEntries(players.map((p) => [p.id, p.name]))
+  const rows: string[] = []
+
+  // Header
+  const positions = FIELD_POSITIONS
+  rows.push(['Manche', ...positions].join(','))
+
+  // Innings
+  for (const inning of lineup.innings) {
+    const row: string[] = [String(inning.inning)]
+    for (const position of positions) {
+      const playerId = inning.assignments[position]
+      const playerName = playerId ? playerNames[playerId] ?? 'Unknown' : '—'
+      row.push(playerName)
+    }
+    rows.push(row.join(','))
+  }
+
+  // Bench rows
+  rows.push(['BANC', ...new Array(positions.length - 1).fill('')].join(','))
+  for (const inning of lineup.innings) {
+    const benchStr = inning.bench.map((id) => playerNames[id] ?? 'Unknown').join(' | ')
+    rows.push([String(inning.inning), benchStr].join(','))
+  }
+
+  return rows.join('\n')
+}
+
+export function validateLineupJSON(data: unknown): {
+  valid: boolean
+  error?: string
+  parsed?: ExportedLineup
+} {
+  try {
+    const parsed = data as ExportedLineup
+    if (!parsed.lineup || !Array.isArray(parsed.lineup.innings)) {
+      return { valid: false, error: 'Structure lineup invalide' }
+    }
+    if (!parsed.players || !Array.isArray(parsed.players)) {
+      return { valid: false, error: 'Liste des joueurs manquante' }
+    }
+    return { valid: true, parsed }
+  } catch (err) {
+    return { valid: false, error: 'Erreur JSON parse' }
+  }
+}
+
+export type ImportLineupPreview = {
+  inningsCount: number
+  teamName: string
+  playersInLineup: number
+  playersToCreate: number
+  createdPlayersNames: string[]
+}
+
+export function buildImportPreview(
+  lineupData: ExportedLineup,
+  currentPlayers: Player[],
+): ImportLineupPreview {
+  const currentPlayerIds = new Set(currentPlayers.map((p) => p.id))
+  const dataPlayerIds = lineupData.players.map((p) => p.id)
+  const playersToCreate = dataPlayerIds.filter((id) => !currentPlayerIds.has(id))
+  const createdPlayersNames = lineupData.players
+    .filter((p) => playersToCreate.includes(p.id))
+    .map((p) => p.name)
+
+  return {
+    inningsCount: lineupData.inningsCount,
+    teamName: lineupData.team.name,
+    playersInLineup: dataPlayerIds.length,
+    playersToCreate: playersToCreate.length,
+    createdPlayersNames,
+  }
+}
+
+export function createMissingPlayersFromLineup(lineupData: ExportedLineup, currentPlayers: Player[]): Player[] {
+  const currentPlayerIds = new Set(currentPlayers.map((p) => p.id))
+  const newPlayers: Player[] = []
+
+  for (const importedPlayer of lineupData.players) {
+    if (!currentPlayerIds.has(importedPlayer.id)) {
+      newPlayers.push({
+        id: importedPlayer.id,
+        name: importedPlayer.name,
+        teamId: 0,
+        positions: importedPlayer.positions,
+        flexibilityLevel: importedPlayer.flexibilityLevel,
+        excludedPositions: [],
+      })
+    }
+  }
+
+  return newPlayers
 }
