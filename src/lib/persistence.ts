@@ -232,33 +232,51 @@ function toDbBenchTotals(benchTotals: MatchHistoryEntry['benchTotals'], playerId
 
 async function replacePlayers(teamId: number, players: Player[]): Promise<PlayerIdMap> {
   const db = getSupabase()
-
-  const { error: deletePlayersError } = await db.from('players_bb').delete().eq('team_id', teamId)
-
-  if (deletePlayersError) throw deletePlayersError
-
   const playerIdMap: PlayerIdMap = new Map()
 
+  if (players.length === 0) {
+    const { error } = await db.from('players_bb').delete().eq('team_id', teamId)
+    if (error) throw error
+    return playerIdMap
+  }
+
+  // Upsert each player using (team_id, name) as the stable key.
+  // This avoids deleting + re-inserting all rows and generating new DB IDs on every save.
+  const updatedAt = new Date().toISOString()
+
   for (const player of players) {
-    const { data: insertedPlayer, error: insertPlayerError } = await db
+    const { data: upsertedPlayer, error: upsertError } = await db
       .from('players_bb')
-      .insert({
-        team_id: teamId,
-        name: player.name,
-        positions: player.positions,
-        flexibility_level: player.flexibilityLevel,
-        excluded_positions: player.excludedPositions ?? [],
-        locked_position: player.lockedPosition ?? null,
-        locked_can_bench: player.lockedCanBench ?? false,
-        updated_at: new Date().toISOString(),
-      })
+      .upsert(
+        {
+          team_id: teamId,
+          name: player.name,
+          positions: player.positions,
+          flexibility_level: player.flexibilityLevel,
+          excluded_positions: player.excludedPositions ?? [],
+          locked_position: player.lockedPosition ?? null,
+          locked_can_bench: player.lockedCanBench ?? false,
+          updated_at: updatedAt,
+        },
+        { onConflict: 'team_id,name' },
+      )
       .select('id')
       .single<{ id: number }>()
 
-    if (insertPlayerError) throw insertPlayerError
+    if (upsertError) throw upsertError
 
-    playerIdMap.set(player.id, insertedPlayer.id)
+    playerIdMap.set(player.id, upsertedPlayer.id)
   }
+
+  // Delete players that are no longer in the roster.
+  const playerNames = players.map((player) => player.name)
+  const { error: deleteError } = await db
+    .from('players_bb')
+    .delete()
+    .eq('team_id', teamId)
+    .not('name', 'in', `(${playerNames.map((n) => `"${n}"`).join(',')})`)
+
+  if (deleteError) throw deleteError
 
   return playerIdMap
 }
@@ -425,7 +443,7 @@ export async function loadRemoteState(userId: number): Promise<PersistedAppState
 
   const [{ data: players, error: playersError }, { data: rules, error: rulesError }, { data: history, error: historyError }] =
     await Promise.all([
-      db.from('players_bb').select('*').eq('team_id', team.id).order('id', { ascending: true }),
+      db.from('players_bb').select('id,team_id,name,positions,flexibility_level,excluded_positions,locked_position,locked_can_bench').eq('team_id', team.id).order('id', { ascending: true }),
       db
         .from('rules_bb')
         .select('*')

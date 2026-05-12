@@ -112,6 +112,13 @@
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+/* Sur mobile, affiche 'Configurer le match' avant la liste des joueurs */
+@media (max-width: 1024px) {
+  .two-columns > article.match-config-panel {
+    order: -1;
+  }
+}
+
 .stack {
   display: grid;
   gap: 1rem;

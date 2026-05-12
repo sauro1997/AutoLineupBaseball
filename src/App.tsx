@@ -1421,7 +1421,7 @@ function App() {
           </div>
         </article>
 
-        <article className="panel">
+        <article className="panel match-config-panel">
           <div className="panel-heading">
             <div>
               <TeamLogoBadge logoUrl={team.logoUrl} title="Section match" />
@@ -1493,6 +1493,11 @@ function App() {
                   ))
                 )}
               </select>
+              {startingPitcherOptions.length === 0 && (
+                <p style={{ fontSize: '0.8rem', color: 'var(--warning, #f59e0b)', marginTop: '0.35rem' }}>
+                  ⚠️ Aucun lanceur disponible. Assignez la position <strong>P</strong> en primaire, secondaire ou tertiaire à au moins un joueur actif.
+                </p>
+              )}
             </label>
             <label>
               Manches max du lanceur
@@ -1928,7 +1933,7 @@ function App() {
         </button>
         <button type="button" className="ghost" onClick={scrollToFirstInning}>
           👀 Voir match
-        </button>
+        </button>npm run dev
       </div>
 
         </>
