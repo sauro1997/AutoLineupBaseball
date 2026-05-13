@@ -38,6 +38,22 @@ import { isSupabaseConfigured } from './lib/supabaseClient'
 
 type GeneratedLineup = ReturnType<typeof generateLineupLocally>
 
+type ShareViewInning = {
+  inning: number
+  score: number
+  notes: string[]
+  bench: string[]
+  assignments: Record<Position, string>
+}
+
+type ShareViewPayload = {
+  version: 1
+  teamName: string
+  matchLabel: string
+  matchDate: string
+  innings: ShareViewInning[]
+}
+
 type BuildVersionPayload = {
   buildId?: string
 }
@@ -280,8 +296,87 @@ function getPitcherForInning(rules: MatchRules, inning: number) {
   return pitcherId
 }
 
-function encodeShareState(state: PersistedAppState) {
-  return `#share=${window.btoa(encodeURIComponent(JSON.stringify(state)))}`
+function decodeShareState(encoded: string): PersistedAppState | null {
+  try {
+    const decoded = decodeURIComponent(window.atob(encoded))
+    const parsed = JSON.parse(decoded) as PersistedAppState
+    if (!parsed || typeof parsed !== 'object' || !Array.isArray(parsed.players) || !parsed.rules || !parsed.team) {
+      return null
+    }
+
+    return parsed
+  } catch {
+    return null
+  }
+}
+
+function toBase64Url(value: string) {
+  return window.btoa(value).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '')
+}
+
+function fromBase64Url(value: string) {
+  const normalized = value.replace(/-/g, '+').replace(/_/g, '/')
+  const padded = normalized + '='.repeat((4 - (normalized.length % 4)) % 4)
+  return window.atob(padded)
+}
+
+function encodeShareViewPayload(payload: ShareViewPayload) {
+  return toBase64Url(encodeURIComponent(JSON.stringify(payload)))
+}
+
+function decodeShareViewPayload(encoded: string): ShareViewPayload | null {
+  try {
+    const decoded = decodeURIComponent(fromBase64Url(encoded))
+    const parsed = JSON.parse(decoded) as Partial<ShareViewPayload>
+
+    if (parsed.version !== 1) return null
+    if (typeof parsed.teamName !== 'string' || parsed.teamName.trim().length === 0) return null
+    if (typeof parsed.matchLabel !== 'string' || parsed.matchLabel.trim().length === 0) return null
+    if (typeof parsed.matchDate !== 'string' || parsed.matchDate.trim().length === 0) return null
+    if (!Array.isArray(parsed.innings) || parsed.innings.length === 0) return null
+
+    const innings = parsed.innings.filter((inning): inning is ShareViewInning => {
+      return (
+        typeof inning?.inning === 'number' &&
+        Number.isInteger(inning.inning) &&
+        inning.inning > 0 &&
+        typeof inning.score === 'number' &&
+        Array.isArray(inning.notes) &&
+        Array.isArray(inning.bench) &&
+        typeof inning.assignments === 'object' &&
+        inning.assignments !== null
+      )
+    })
+
+    if (innings.length !== parsed.innings.length) return null
+
+    return {
+      version: 1,
+      teamName: parsed.teamName,
+      matchLabel: parsed.matchLabel,
+      matchDate: parsed.matchDate,
+      innings,
+    }
+  } catch {
+    return null
+  }
+}
+
+function readShareViewTokenFromLocation() {
+  const params = new URLSearchParams(window.location.search)
+  const queryToken = params.get('view')
+  if (queryToken) return queryToken
+
+  if (window.location.hash.startsWith('#view=')) {
+    return window.location.hash.slice('#view='.length)
+  }
+
+  return null
+}
+
+function readLegacyShareTokenFromLocation() {
+  if (!window.location.hash.startsWith('#share=')) return null
+  return window.location.hash.slice('#share='.length)
 }
 
 function normalizeNumericId(value: unknown) {
@@ -507,6 +602,9 @@ function App() {
   const [importLineupData, setImportLineupData] = useState<ExportedLineup | null>(null)
   const [importError, setImportError] = useState<string | null>(null)
   const [printTargetMatchId, setPrintTargetMatchId] = useState<string | 'current'>('current')
+  const [shareViewPayload, setShareViewPayload] = useState<ShareViewPayload | null>(null)
+
+  const isShareViewerMode = shareViewPayload !== null
 
   function applyPersistedState(nextState: PersistedAppState) {
     setTeam(nextState.team)
@@ -522,6 +620,35 @@ function App() {
   }
 
   useEffect(() => {
+    const shareViewToken = readShareViewTokenFromLocation()
+    if (shareViewToken) {
+      const decodedPayload = decodeShareViewPayload(shareViewToken)
+      if (!decodedPayload) {
+        setStatus('Lien partage manches invalide ou incomplet.')
+        return
+      }
+
+      setShareViewPayload(decodedPayload)
+      setStatus('Mode partage activé: lecture seule des manches.')
+      return
+    }
+
+    const legacyShareToken = readLegacyShareTokenFromLocation()
+    if (!legacyShareToken) return
+
+    const decodedState = decodeShareState(legacyShareToken)
+    if (!decodedState) {
+      setStatus('Lien de partage legacy invalide.')
+      return
+    }
+
+    const normalizedState = normalizePersistedState(decodedState)
+    applyPersistedState(normalizedState)
+    setStatus('Lien de partage legacy chargé.')
+  }, [])
+
+  useEffect(() => {
+    if (isShareViewerMode) return
     if (!isSupabaseConfigured) return
 
     if (!authUser) {
@@ -564,9 +691,10 @@ function App() {
     return () => {
       cancelled = true
     }
-  }, [authUser])
+  }, [authUser, isShareViewerMode])
 
   useEffect(() => {
+    if (isShareViewerMode) return
     if (!isSupabaseConfigured) return
     if (!authUser) return
     if (!dbHydrationDone) return
@@ -594,6 +722,7 @@ function App() {
   }, [
     authUser,
     dbHydrationDone,
+    isShareViewerMode,
     team,
     players,
     rules,
@@ -957,19 +1086,32 @@ function App() {
   }
 
   async function copyShareLink() {
-    const shareState: PersistedAppState = {
-      team,
-      players,
-      rules,
-      manualOverrides,
-      lockedOverrides,
-      matchHistory,
-      selectedHistoryMatchId,
-      historyContextWindow,
+    const lineupToShare = selectedHistoryMatch?.lineup ?? lineup
+    if (lineupToShare.innings.length === 0) {
+      setStatus('Aucune manche à partager pour le moment.')
+      return
     }
-    const link = `${window.location.origin}${window.location.pathname}${encodeShareState(shareState)}`
+
+    const payload: ShareViewPayload = {
+      version: 1,
+      teamName: team.name.trim() || 'Équipe',
+      matchLabel: selectedHistoryMatch?.label ?? 'Match en cours',
+      matchDate: selectedHistoryMatch?.createdAt ?? new Date().toISOString(),
+      innings: lineupToShare.innings.map((inning) => ({
+        inning: inning.inning,
+        score: inning.score,
+        notes: [...inning.notes],
+        bench: inning.bench.map((playerId) => resolvePlayerName(playerId)),
+        assignments: Object.fromEntries(
+          FIELD_POSITIONS.map((position) => [position, resolvePlayerName(inning.assignments[position])]),
+        ) as Record<Position, string>,
+      })),
+    }
+
+    const encodedPayload = encodeShareViewPayload(payload)
+    const link = `${window.location.origin}${window.location.pathname}?view=${encodedPayload}`
     await window.navigator.clipboard.writeText(link)
-    setStatus('Lien de match copié dans le presse-papiers.')
+    setStatus('Lien viewer des manches copié dans le presse-papiers.')
   }
 
   async function handleRegister() {
@@ -1213,6 +1355,65 @@ function App() {
     setStatus('Import annulé.')
   }
 
+  if (isShareViewerMode && shareViewPayload) {
+    return (
+      <div className="app-shell share-viewer-shell">
+        <section id="lineup-section" className="panel share-viewer-panel">
+          <div className="panel-heading">
+            <div>
+              <p className="eyebrow">⚾ Mode partage</p>
+              <h2>Manches en lecture seule</h2>
+            </div>
+          </div>
+
+          <div className="displayed-match-banner history" role="status" aria-live="polite">
+            <strong>Match affiché: {shareViewPayload.matchLabel}</strong>
+            <span>
+              {shareViewPayload.teamName} · {new Date(shareViewPayload.matchDate).toLocaleString('fr-CA')}
+            </span>
+          </div>
+
+          <div className="lineup-grid">
+            {shareViewPayload.innings.map((inning) => (
+              <article id={`inning-card-${inning.inning}`} key={`share-${inning.inning}`} className="inning-card">
+                <div className="inning-card-header">
+                  <h3>Manche {inning.inning}</h3>
+                  <span className="inning-score">Score {inning.score}</span>
+                </div>
+                <div className="inning-table-wrap">
+                  <table className="lineup-table">
+                    <thead>
+                      <tr>
+                        <th>Position</th>
+                        <th>Joueur</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {FIELD_POSITIONS.map((position) => (
+                        <tr key={`share-${inning.inning}-${position}`}>
+                          <td><PosBadge position={position} /></td>
+                          <td>{inning.assignments[position]}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <p className="bench-line">
+                  🪑 Dugout: {inning.bench.join(', ') || 'Aucun'}
+                </p>
+                <ul className="notes-list">
+                  {inning.notes.map((note) => (
+                    <li key={`share-note-${inning.inning}-${note}`}>{note}</li>
+                  ))}
+                </ul>
+              </article>
+            ))}
+          </div>
+        </section>
+      </div>
+    )
+  }
+
   const requiresAuthBeforeEditing = isSupabaseConfigured && !authUser
 
   return (
@@ -1277,7 +1478,7 @@ function App() {
         </div>
         <div className="hero-actions">
           <button type="button" onClick={copyShareLink}>
-            🔗 Copier le lien du match
+            🔗 Copier lien viewer manches
           </button>
           <button type="button" onClick={copySummary}>
             📋 Copier le résumé

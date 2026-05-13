@@ -234,6 +234,16 @@
   grid-template-columns: repeat(auto-fit, minmax(295px, 1fr));
 }
 
+.share-viewer-shell {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding-top: 2.5rem;
+}
+
+.share-viewer-panel {
+  border-top-color: var(--color-green-bright);
+}
+
 .metrics-grid {
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
 }
