@@ -506,6 +506,7 @@ function App() {
   const [importPreview, setImportPreview] = useState<ImportLineupPreview | null>(null)
   const [importLineupData, setImportLineupData] = useState<ExportedLineup | null>(null)
   const [importError, setImportError] = useState<string | null>(null)
+  const [printTargetMatchId, setPrintTargetMatchId] = useState<string | 'current'>('current')
 
   function applyPersistedState(nextState: PersistedAppState) {
     setTeam(nextState.team)
@@ -691,6 +692,10 @@ function App() {
     [players],
   )
 
+  function resolvePlayerName(playerId: number) {
+    return playerNames[playerId] ?? `Joueur #${playerId}`
+  }
+
   const summary = useMemo(() => summarizeLineup(lineup, players), [lineup, players])
   const currentMatchBenchTotals = useMemo(
     () => computeBenchTotals(lineup, activePlayers),
@@ -724,6 +729,20 @@ function App() {
       return playerName.includes(query) || String(player.id).includes(query)
     })
   }, [playerSearchQuery, players])
+
+  const printTargetMatch = useMemo(
+    () => (printTargetMatchId === 'current' ? undefined : matchHistory.find((match) => match.id === printTargetMatchId)),
+    [matchHistory, printTargetMatchId],
+  )
+
+  const lineupToPrint = printTargetMatch?.lineup ?? lineup
+
+  useEffect(() => {
+    if (printTargetMatchId === 'current') return
+    if (matchHistory.some((match) => match.id === printTargetMatchId)) return
+
+    setPrintTargetMatchId('current')
+  }, [matchHistory, printTargetMatchId])
 
   function scrollToFirstInning() {
     window.setTimeout(() => {
@@ -923,6 +942,17 @@ function App() {
     )
   }
 
+  function loadSavedMatchForReview(matchId: string) {
+    const match = matchHistory.find((entry) => entry.id === matchId)
+    if (!match) {
+      setStatus('Match introuvable dans l’historique.')
+      return
+    }
+
+    setSelectedHistoryMatchId(match.id)
+    setStatus(`Match chargé pour visualisation: ${match.label}.`) 
+  }
+
   async function copyShareLink() {
     const shareState: PersistedAppState = {
       team,
@@ -1011,8 +1041,36 @@ function App() {
   }
 
   function printLineup() {
-    window.print()
-    setStatus('Utilisez le dialogue d’impression pour exporter en PDF.')
+    const options = [
+      'Quel match veux-tu imprimer en PDF ?',
+      '1) Match en cours',
+      ...matchHistory.map(
+        (match, index) =>
+          `${index + 2}) ${match.label} · ${new Date(match.createdAt).toLocaleDateString('fr-CA')}`,
+      ),
+    ]
+
+    const rawChoice = window.prompt(options.join('\n'), '1')
+    if (rawChoice === null) return
+
+    const selectedOption = Number(rawChoice.trim())
+    if (!Number.isInteger(selectedOption) || selectedOption < 1 || selectedOption > matchHistory.length + 1) {
+      setStatus('Choix d’impression invalide. Réessaie avec le numéro affiché.')
+      return
+    }
+
+    if (selectedOption === 1) {
+      setPrintTargetMatchId('current')
+      setStatus('Impression du match en cours en préparation...')
+    } else {
+      const selectedMatch = matchHistory[selectedOption - 2]
+      setPrintTargetMatchId(selectedMatch.id)
+      setStatus(`Impression du match "${selectedMatch.label}" en préparation...`)
+    }
+
+    window.setTimeout(() => {
+      window.print()
+    }, 120)
   }
 
   async function handleTeamLogoUpload(event: React.ChangeEvent<HTMLInputElement>) {
@@ -1746,6 +1804,9 @@ function App() {
             <button type="button" className="ghost" onClick={saveCurrentMatch}>
               💾 Sauvegarder ce match
             </button>
+            <button type="button" className="ghost" onClick={printLineup}>
+              🖨️ Imprimer Manches PDF
+            </button>
             <p className="status-chip">{status}</p>
           </div>
         </div>
@@ -1794,8 +1855,8 @@ function App() {
                     <span>{new Date(match.createdAt).toLocaleString('fr-CA')}</span>
                   </div>
                   <div className="match-history-actions">
-                    <button type="button" className="ghost" onClick={() => setSelectedHistoryMatchId(match.id)}>
-                      Utiliser
+                    <button type="button" className="ghost" onClick={() => loadSavedMatchForReview(match.id)}>
+                      Voir manches
                     </button>
                     <button type="button" className="ghost danger" onClick={() => removeSavedMatch(match.id)}>
                       Supprimer
@@ -1807,6 +1868,99 @@ function App() {
           ) : (
             <p className="match-history-note">Sauvegardez un match généré pour l'utiliser comme référence au prochain.</p>
           )}
+
+          {selectedHistoryMatch ? (
+            <div className="match-history-viewer">
+              <div className="match-history-viewer-header">
+                <h3>Match chargé: {selectedHistoryMatch.label}</h3>
+                <span>{new Date(selectedHistoryMatch.createdAt).toLocaleString('fr-CA')}</span>
+              </div>
+              <p className="match-history-note">
+                Visualisation des manches jouées et du banc pour ce match sauvegardé.
+              </p>
+
+              <div className="lineup-grid lineup-grid-history">
+                {selectedHistoryMatch.lineup.innings.map((inning) => (
+                  <article key={`history-${selectedHistoryMatch.id}-${inning.inning}`} className="inning-card inning-card-history">
+                    <div className="inning-card-header">
+                      <h3>Manche {inning.inning}</h3>
+                      <span className="inning-score">Score {inning.score}</span>
+                    </div>
+                    <div className="inning-table-wrap">
+                      <table className="lineup-table">
+                        <thead>
+                          <tr>
+                            <th>Position</th>
+                            <th>Joueur</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {FIELD_POSITIONS.map((position) => {
+                            const assignedPlayerId = inning.assignments[position]
+                            return (
+                              <tr key={`history-${selectedHistoryMatch.id}-${inning.inning}-${position}`}>
+                                <td><PosBadge position={position} /></td>
+                                <td>{resolvePlayerName(assignedPlayerId)}</td>
+                              </tr>
+                            )
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                    <p className="bench-line">
+                      🪑 Dugout: {inning.bench.map((playerId) => resolvePlayerName(playerId)).join(', ') || 'Aucun'}
+                    </p>
+                  </article>
+                ))}
+              </div>
+            </div>
+          ) : null}
+        </div>
+
+        <div className="print-only-block" aria-hidden="true">
+          <h3>Impression PDF</h3>
+          <p>
+            Match imprimé: {printTargetMatch ? `${printTargetMatch.label} · ${new Date(printTargetMatch.createdAt).toLocaleDateString('fr-CA')}` : 'Match en cours'}
+          </p>
+          <div className="print-match-grid">
+            {lineupToPrint.innings.map((inning) => (
+              <article key={`print-${printTargetMatch?.id ?? 'current'}-${inning.inning}`} className="inning-card">
+                <div className="inning-card-header">
+                  <h3>Manche {inning.inning}</h3>
+                  <span className="inning-score">Score {inning.score}</span>
+                </div>
+                <div className="inning-table-wrap">
+                  <table className="lineup-table">
+                    <thead>
+                      <tr>
+                        <th>Position</th>
+                        <th>Joueur</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {FIELD_POSITIONS.map((position) => {
+                        const assignedPlayerId = inning.assignments[position]
+                        return (
+                          <tr key={`print-${printTargetMatch?.id ?? 'current'}-${inning.inning}-${position}`}>
+                            <td><PosBadge position={position} /></td>
+                            <td>{resolvePlayerName(assignedPlayerId)}</td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+                <p className="bench-line">
+                  🪑 Dugout: {inning.bench.map((playerId) => resolvePlayerName(playerId)).join(', ') || 'Aucun'}
+                </p>
+                <ul className="notes-list">
+                  {inning.notes.map((note) => (
+                    <li key={`print-note-${printTargetMatch?.id ?? 'current'}-${inning.inning}-${note}`}>{note}</li>
+                  ))}
+                </ul>
+              </article>
+            ))}
+          </div>
         </div>
 
         <div className="lineup-grid">
@@ -1895,7 +2049,7 @@ function App() {
                 </table>
               </div>
               <p className="bench-line">
-                🪑 Dugout: {inning.bench.map((playerId) => playerNames[playerId]).join(', ') || 'Aucun'}
+                🪑 Dugout: {inning.bench.map((playerId) => resolvePlayerName(playerId)).join(', ') || 'Aucun'}
               </p>
               <ul className="notes-list">
                 {inning.notes.map((note) => (

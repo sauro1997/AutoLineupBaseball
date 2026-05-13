@@ -581,6 +581,42 @@ button.active-lock:hover {
   flex-wrap: wrap;
 }
 
+.match-history-viewer {
+  border-top: 1px solid var(--color-border);
+  padding-top: 0.9rem;
+  display: grid;
+  gap: 0.75rem;
+}
+
+.match-history-viewer-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  align-items: center;
+}
+
+.match-history-viewer-header h3 {
+  margin: 0;
+  font-size: 1rem;
+  color: var(--color-text);
+  font-family: var(--font-display);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.match-history-viewer-header span {
+  color: var(--color-text-dim);
+  font-size: 0.8rem;
+}
+
+.lineup-grid-history {
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+}
+
+.inning-card-history {
+  padding: 0.9rem;
+}
+
 .rule-summary h3 {
   color: var(--color-text-muted);
   font-family: var(--font-display);
@@ -843,6 +879,15 @@ td button {
 /* ---- Sticky mobile bar hidden on desktop ---- */
 .mobile-sticky-bar {
   display: none;
+}
+
+.print-only-block {
+  display: none;
+}
+
+.print-match-grid {
+  display: grid;
+  gap: 0.6rem;
 }
 
 /* ---- Pitcher change controls (always visible) ---- */
@@ -1270,6 +1315,11 @@ td button {
     padding: 0.6rem 0.7rem;
   }
 
+  .match-history-viewer-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
   .match-history-item strong {
     font-size: 0.9rem;
   }
@@ -1395,9 +1445,22 @@ td button {
   }
 
   .innings-print-section .lineup-grid {
+    display: none !important;
+  }
+
+  .innings-print-section .print-only-block {
+    display: block !important;
+  }
+
+  .innings-print-section .print-match-grid {
     display: grid !important;
     grid-template-columns: 1fr !important;
     gap: 0.6rem !important;
+  }
+
+  .innings-print-section .print-only-block h3,
+  .innings-print-section .print-only-block p {
+    color: #000 !important;
   }
 
   .innings-print-section .inning-card {
