@@ -442,7 +442,7 @@ function normalizePersistedState(state: PersistedAppState): PersistedAppState {
     ) as ManualOverrideMap,
     matchHistory: (state.matchHistory ?? []).map((match, index) => ({
       id: String(match.id ?? `${Date.now()}-${index + 1}`),
-      label: match.label?.trim() || `Match ${index + 1}`,
+      label: typeof match.label === 'string' ? match.label : `Match ${index + 1}`,
       createdAt: match.createdAt ?? new Date().toISOString(),
       lineup: match.lineup,
       benchTotals: Object.fromEntries(
@@ -736,6 +736,9 @@ function App() {
   )
 
   const lineupToPrint = printTargetMatch?.lineup ?? lineup
+  const displayedMatchSubtitle = selectedHistoryMatch
+    ? `${selectedHistoryMatch.label} · ${new Date(selectedHistoryMatch.createdAt).toLocaleString('fr-CA')}`
+    : 'Alignement actif en cours de préparation'
 
   useEffect(() => {
     if (printTargetMatchId === 'current') return
@@ -938,7 +941,7 @@ function App() {
 
   function renameSavedMatch(matchId: string, label: string) {
     setMatchHistory((current) =>
-      current.map((match) => (match.id === matchId ? { ...match, label: label.trim() || match.label } : match)),
+      current.map((match) => (match.id === matchId ? { ...match, label } : match)),
     )
   }
 
@@ -1869,52 +1872,13 @@ function App() {
             <p className="match-history-note">Sauvegardez un match généré pour l'utiliser comme référence au prochain.</p>
           )}
 
-          {selectedHistoryMatch ? (
-            <div className="match-history-viewer">
-              <div className="match-history-viewer-header">
-                <h3>Match chargé: {selectedHistoryMatch.label}</h3>
-                <span>{new Date(selectedHistoryMatch.createdAt).toLocaleString('fr-CA')}</span>
-              </div>
-              <p className="match-history-note">
-                Visualisation des manches jouées et du banc pour ce match sauvegardé.
-              </p>
+        </div>
 
-              <div className="lineup-grid lineup-grid-history">
-                {selectedHistoryMatch.lineup.innings.map((inning) => (
-                  <article key={`history-${selectedHistoryMatch.id}-${inning.inning}`} className="inning-card inning-card-history">
-                    <div className="inning-card-header">
-                      <h3>Manche {inning.inning}</h3>
-                      <span className="inning-score">Score {inning.score}</span>
-                    </div>
-                    <div className="inning-table-wrap">
-                      <table className="lineup-table">
-                        <thead>
-                          <tr>
-                            <th>Position</th>
-                            <th>Joueur</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {FIELD_POSITIONS.map((position) => {
-                            const assignedPlayerId = inning.assignments[position]
-                            return (
-                              <tr key={`history-${selectedHistoryMatch.id}-${inning.inning}-${position}`}>
-                                <td><PosBadge position={position} /></td>
-                                <td>{resolvePlayerName(assignedPlayerId)}</td>
-                              </tr>
-                            )
-                          })}
-                        </tbody>
-                      </table>
-                    </div>
-                    <p className="bench-line">
-                      🪑 Dugout: {inning.bench.map((playerId) => resolvePlayerName(playerId)).join(', ') || 'Aucun'}
-                    </p>
-                  </article>
-                ))}
-              </div>
-            </div>
-          ) : null}
+        <div className={`displayed-match-banner ${selectedHistoryMatch ? 'history' : 'current'}`} role="status" aria-live="polite">
+          <strong>
+            {selectedHistoryMatch ? 'Match affiché: historique sauvegardé' : 'Match affiché: match en cours'}
+          </strong>
+          <span>{displayedMatchSubtitle}</span>
         </div>
 
         <div className="print-only-block" aria-hidden="true">
@@ -1964,13 +1928,14 @@ function App() {
         </div>
 
         <div className="lineup-grid">
-          {lineup.innings.map((inning) => (
+          {(selectedHistoryMatch ? selectedHistoryMatch.lineup.innings : lineup.innings).map((inning) => (
             <article id={`inning-card-${inning.inning}`} key={inning.inning} className="inning-card">
               <div className="inning-card-header">
                 <h3>Manche {inning.inning}</h3>
                 <span className="inning-score">Score {inning.score}</span>
               </div>
-              {inning.inning > 1 ? (
+              {/* Les contrôles d’édition ne sont affichés que pour le match en cours */}
+              {!selectedHistoryMatch && inning.inning > 1 ? (
                 <div className="pitcher-change-controls">
                   <label>
                     Lanceur dès cette manche
@@ -2006,7 +1971,7 @@ function App() {
                   <tr>
                     <th>Position</th>
                     <th>Joueur</th>
-                    <th>Lock</th>
+                    {!selectedHistoryMatch && <th>Lock</th>}
                   </tr>
                 </thead>
                 <tbody>
@@ -2016,32 +1981,38 @@ function App() {
                       <tr key={position}>
                         <td><PosBadge position={position} /></td>
                         <td>
-                          <select
-                            value={manualOverrides[overrideKey] ?? inning.assignments[position]}
-                            onChange={(event) =>
-                              updateOverride(
-                                inning.inning,
-                                position,
-                                event.target.value ? Number(event.target.value) : undefined,
-                              )
-                            }
-                          >
-                            {activePlayers.map((player) => (
-                              <option key={player.id} value={player.id}>
-                                {player.name}
-                              </option>
-                            ))}
-                          </select>
+                          {selectedHistoryMatch ? (
+                            resolvePlayerName(inning.assignments[position])
+                          ) : (
+                            <select
+                              value={manualOverrides[overrideKey] ?? inning.assignments[position]}
+                              onChange={(event) =>
+                                updateOverride(
+                                  inning.inning,
+                                  position,
+                                  event.target.value ? Number(event.target.value) : undefined,
+                                )
+                              }
+                            >
+                              {activePlayers.map((player) => (
+                                <option key={player.id} value={player.id}>
+                                  {player.name}
+                                </option>
+                              ))}
+                            </select>
+                          )}
                         </td>
-                        <td>
-                          <button
-                            type="button"
-                            className={lockedOverrides.includes(overrideKey) ? 'active-lock' : 'ghost'}
-                            onClick={() => toggleLockedOverride(inning.inning, position)}
-                          >
-                            {lockedOverrides.includes(overrideKey) ? 'Verrouillé' : 'Libre'}
-                          </button>
-                        </td>
+                        {!selectedHistoryMatch && (
+                          <td>
+                            <button
+                              type="button"
+                              className={lockedOverrides.includes(overrideKey) ? 'active-lock' : 'ghost'}
+                              onClick={() => toggleLockedOverride(inning.inning, position)}
+                            >
+                              {lockedOverrides.includes(overrideKey) ? 'Verrouillé' : 'Libre'}
+                            </button>
+                          </td>
+                        )}
                       </tr>
                     )
                   })}
@@ -2276,8 +2247,17 @@ function App() {
         </button>
         <button type="button" className="ghost" onClick={scrollToFirstInning}>
           👀 Voir match
-        </button>npm run dev
+        </button>
       </div>
+
+      <button
+        type="button"
+        className="desktop-jump-button"
+        onClick={scrollToFirstInning}
+        aria-label="Voir les manches"
+      >
+        ↑ Voir l'alignement par manches
+      </button>
 
         </>
       )}
