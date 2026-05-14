@@ -966,6 +966,13 @@ function App() {
   )
 
   const lineupToPrint = printTargetMatch?.lineup ?? lineup
+  const printBattingOrder = useMemo(
+    () =>
+      printTargetMatch
+        ? (printTargetMatch.battingOrderPlayerIds ?? []).map((id) => playerNames[id] ?? `Joueur #${id}`)
+        : battingOrderPlayers.map((p) => p.name || `Joueur ${p.id}`),
+    [printTargetMatch, battingOrderPlayers, playerNames],
+  )
   const displayedMatchSubtitle = selectedHistoryMatch
     ? `${selectedHistoryMatch.label} · ${new Date(selectedHistoryMatch.createdAt).toLocaleString('fr-CA')}`
     : 'Alignement actif en cours de préparation'
@@ -1097,6 +1104,14 @@ function App() {
     const nextOrder = normalizeBattingOrderPlayerIds([], players)
     setBattingOrderPlayerIds(nextOrder)
     setStatus('Ordre des frappeurs réinitialisé selon les joueurs présents.')
+  }
+
+  function printBattingOrderOnly() {
+    document.body.classList.add('batting-order-print-mode')
+    window.setTimeout(() => {
+      window.print()
+      document.body.classList.remove('batting-order-print-mode')
+    }, 80)
   }
 
   function buildShareBattingOrderNames(lineupToShare: GeneratedLineup, preferredOrderIds?: number[]) {
@@ -1665,6 +1680,7 @@ function App() {
   }
 
   return (
+    <>
     <div className="app-shell">
       <header className="hero-card">
         <div>
@@ -2250,9 +2266,14 @@ function App() {
                   Tous les joueurs présents peuvent frapper. L’ordre n’est pas limité à 9.
                 </p>
               </div>
-              <button type="button" className="ghost" onClick={resetBattingOrder}>
-                Réinitialiser
-              </button>
+              <div className="stack compact" style={{ alignItems: 'flex-end' }}>
+                <button type="button" className="ghost" onClick={printBattingOrderOnly}>
+                  🖨️ Imprimer l'ordre
+                </button>
+                <button type="button" className="ghost" onClick={resetBattingOrder}>
+                  Réinitialiser
+                </button>
+              </div>
             </div>
 
             {battingOrderPlayers.length === 0 ? (
@@ -2285,6 +2306,7 @@ function App() {
                 ))}
               </ol>
             )}
+
           </div>
 
         </article>
@@ -2392,11 +2414,24 @@ function App() {
           <span>{displayedMatchSubtitle}</span>
         </div>
 
-        <div className="print-only-block" aria-hidden="true">
+        <div className="print-only-block">
           <h3>Impression PDF</h3>
           <p>
             Match imprimé: {printTargetMatch ? `${printTargetMatch.label} · ${new Date(printTargetMatch.createdAt).toLocaleDateString('fr-CA')}` : 'Match en cours'}
           </p>
+          {printBattingOrder.length > 0 && (
+            <div className="print-batting-order">
+              <strong className="print-batting-order-title">🥎 Ordre des frappeurs :</strong>
+              <ol className="print-batting-order-list">
+                {printBattingOrder.map((name, index) => (
+                  <li key={index} className="print-batting-order-item">
+                    <span className="print-batting-rank">{index + 1}.</span>
+                    <span>{name}</span>
+                  </li>
+                ))}
+              </ol>
+            </div>
+          )}
           <div className="print-match-grid">
             {lineupToPrint.innings.map((inning) => (
               <article key={`print-${printTargetMatch?.id ?? 'current'}-${inning.inning}`} className="inning-card">
@@ -2825,6 +2860,23 @@ function App() {
         </>
       )}
     </div>
+    <div id="batting-order-print-portal">
+      <h2 className="batting-order-print-team">{team.name || 'Mon équipe'}</h2>
+      <h3 className="batting-order-print-title">🥎 Ordre des frappeurs</h3>
+      {battingOrderPlayers.length === 0 ? (
+        <p>Aucun frappeur défini.</p>
+      ) : (
+        <ol className="batting-order-print-list">
+          {battingOrderPlayers.map((player, index) => (
+            <li key={`bop-${player.id}`} className="batting-order-print-item">
+              <span className="batting-order-print-rank">{index + 1}</span>
+              <span className="batting-order-print-name">{player.name || `Joueur ${player.id}`}</span>
+            </li>
+          ))}
+        </ol>
+      )}
+    </div>
+    </>
   )
 }
 
