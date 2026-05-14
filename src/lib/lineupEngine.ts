@@ -485,6 +485,319 @@ function getPitcherReliefNote(
   return `Relève auto: ${designatedPitcher.name} a atteint la limite (${rules.maxPitcherInnings}), ${assignedPitcher.name} prend le monticule.`
 }
 
+function repairBenchLimitViolations(
+  players: Player[],
+  rules: MatchRules,
+  playerStates: Map<number, PlayerState>,
+  inning: number,
+  assignments: Record<Position, number>,
+  lockedAssignments: Record<Position, number>,
+  forcedOnFieldPlayers: Set<number>,
+) {
+  if (rules.maxConsecutiveBench <= 0) return
+
+  const playersById = Object.fromEntries(players.map((player) => [player.id, player]))
+  const lockedPitcherId = getLockedPitcherId(playerStates, rules, inning)
+
+  let hasImproved = true
+  while (hasImproved) {
+    hasImproved = false
+
+    const usedPlayers = new Set(Object.values(assignments))
+    const protectedPlayersOnBench = players
+      .filter((player) => {
+        const state = playerStates.get(player.id)
+        return (
+          state !== undefined &&
+          state.benchInnings >= rules.maxConsecutiveBench &&
+          !usedPlayers.has(player.id)
+        )
+      })
+
+    if (protectedPlayersOnBench.length === 0) break
+
+    for (const protectedPlayer of protectedPlayersOnBench) {
+      const protectedState = playerStates.get(protectedPlayer.id)!
+
+      for (const position of FIELD_POSITIONS) {
+        const currentPlayerId = assignments[position]
+        if (currentPlayerId === undefined) continue
+        if (currentPlayerId === protectedPlayer.id) continue
+        if (forcedOnFieldPlayers.has(currentPlayerId)) continue
+
+        const lockOwnerId = lockedAssignments[position]
+        if (lockOwnerId !== undefined && lockOwnerId !== protectedPlayer.id) continue
+
+        const currentPlayer = playersById[currentPlayerId]
+        if (!currentPlayer) continue
+        if (currentPlayer.lockedPosition && !currentPlayer.lockedCanBench) continue
+
+        const currentPlayerState = playerStates.get(currentPlayerId)
+        if (!currentPlayerState) continue
+        if (currentPlayerState.benchInnings >= rules.maxConsecutiveBench) continue
+
+        if (
+          !canTakePosition(
+            protectedPlayer,
+            position,
+            rules,
+            protectedState,
+            lockedPitcherId,
+            lockOwnerId,
+          )
+        ) {
+          continue
+        }
+
+        assignments[position] = protectedPlayer.id
+        hasImproved = true
+        break
+      }
+
+      if (hasImproved) break
+    }
+  }
+}
+
+function strongEnforceForcedPlayers(
+  players: Player[],
+  rules: MatchRules,
+  playerStates: Map<number, PlayerState>,
+  inning: number,
+  assignments: Record<Position, number>,
+  lockedAssignments: Record<Position, number>,
+  forcedOnFieldPlayers: Set<number>,
+) {
+  if (forcedOnFieldPlayers.size === 0) return
+
+  const playersById = Object.fromEntries(players.map((player) => [player.id, player]))
+  const lockedPitcherId = getLockedPitcherId(playerStates, rules, inning)
+  const usedPlayers = new Set(Object.values(assignments))
+
+  for (const forcedPlayerId of forcedOnFieldPlayers) {
+    if (usedPlayers.has(forcedPlayerId)) continue
+
+    const forcedPlayer = playersById[forcedPlayerId]
+    if (!forcedPlayer) continue
+
+    const forcedPlayerState = playerStates.get(forcedPlayerId)
+    if (!forcedPlayerState) continue
+
+    let placed = false
+    for (const position of FIELD_POSITIONS) {
+      const lockOwnerId = lockedAssignments[position]
+      if (lockOwnerId !== undefined && lockOwnerId !== forcedPlayerId) continue
+
+      if (
+        !canTakePosition(
+          forcedPlayer,
+          position,
+          rules,
+          forcedPlayerState,
+          lockedPitcherId,
+          lockOwnerId,
+        )
+      ) {
+        continue
+      }
+
+      const currentPlayerId = assignments[position]
+      const currentPlayer = currentPlayerId ? playersById[currentPlayerId] : undefined
+
+      if (
+        currentPlayer &&
+        currentPlayer.lockedPosition &&
+        !currentPlayer.lockedCanBench
+      ) {
+        continue
+      }
+
+      if (currentPlayer && forcedOnFieldPlayers.has(currentPlayerId)) {
+        continue
+      }
+
+      assignments[position] = forcedPlayerId
+      usedPlayers.add(forcedPlayerId)
+      placed = true
+      break
+    }
+
+    // Fallback : si aucune position compatible trouvée, forcer le remplacement
+    // d'un joueur non-forcé pour garantir que ce joueur ne reste pas au banc
+    if (!placed) {
+      for (const position of FIELD_POSITIONS) {
+        const currentPlayerId = assignments[position]
+        if (currentPlayerId === undefined) continue
+        if (forcedOnFieldPlayers.has(currentPlayerId)) continue
+        assignments[position] = forcedPlayerId
+        usedPlayers.add(forcedPlayerId)
+        break
+      }
+    }
+  }
+}
+
+  function absolutelyPreventDoubleBench(
+    players: Player[],
+    rules: MatchRules,
+    playerStates: Map<number, PlayerState>,
+    inning: number,
+    assignments: Record<Position, number>,
+    lockedAssignments: Record<Position, number>,
+  ) {
+    if (rules.maxConsecutiveBench <= 0) return
+
+    const playersById = Object.fromEntries(players.map((player) => [player.id, player]))
+    const lockedPitcherId = getLockedPitcherId(playerStates, rules, inning)
+    const usedPlayers = new Set(Object.values(assignments))
+
+    const playersAlreadyBenched = players.filter((player) => {
+      const state = playerStates.get(player.id)
+      return state && state.benchInnings > 0 && !usedPlayers.has(player.id)
+    })
+
+    for (const previouslyBenchedPlayer of playersAlreadyBenched) {
+      const playerState = playerStates.get(previouslyBenchedPlayer.id)!
+
+      for (const position of FIELD_POSITIONS) {
+        const lockOwnerId = lockedAssignments[position]
+        if (lockOwnerId !== undefined && lockOwnerId !== previouslyBenchedPlayer.id) continue
+
+        if (
+          !canTakePosition(
+            previouslyBenchedPlayer,
+            position,
+            rules,
+            playerState,
+            lockedPitcherId,
+            lockOwnerId,
+          )
+        ) {
+          continue
+        }
+
+        const currentPlayerId = assignments[position]
+        const currentPlayer = currentPlayerId ? playersById[currentPlayerId] : undefined
+
+        if (!currentPlayer) {
+          continue
+        }
+
+        if (currentPlayer.lockedPosition && !currentPlayer.lockedCanBench) {
+          continue
+        }
+
+        const currentPlayerState = playerStates.get(currentPlayerId)
+        if (currentPlayerState && currentPlayerState.benchInnings > 0) {
+          continue
+        }
+
+        assignments[position] = previouslyBenchedPlayer.id
+        usedPlayers.add(previouslyBenchedPlayer.id)
+        break
+      }
+    }
+  }
+function getBenchViolationReason(
+  player: Player,
+  position: Position,
+  rules: MatchRules,
+  playerState: PlayerState,
+  lockedPitcherId: number | undefined,
+  lockOwnerId: number | undefined,
+) {
+  const isLockedPitcherException = position === 'P' && lockedPitcherId !== undefined && player.id === lockedPitcherId
+
+  if (lockOwnerId !== undefined && lockOwnerId !== player.id) return 'position verrouillée par override/lock'
+  if (player.lockedPosition && player.lockedPosition !== position && !isLockedPitcherException) {
+    return `joueur verrouillé en ${player.lockedPosition}`
+  }
+  if (position === 'P' && lockedPitcherId !== undefined && player.id !== lockedPitcherId) {
+    return 'lanceur imposé pour cette manche'
+  }
+  if (position === 'P' && player.id === rules.pitcherId && playerState.inningsPitched >= rules.maxPitcherInnings) {
+    return 'limite de manches du lanceur atteinte'
+  }
+  if (rules.fixedCenterField) {
+    const fixedForPosition = rules.fixedAssignments.find((assignment) => assignment.position === position)
+    if (fixedForPosition && player.id !== fixedForPosition.playerId) return 'position fixée (défense verrouillée)'
+  }
+  if (getCompatibilityScore(player, position) <= POSITION_SCORES.incompatible) return 'incompatible sur cette position'
+
+  return undefined
+}
+
+function explainBenchLimitViolation(
+  players: Player[],
+  rules: MatchRules,
+  playerStates: Map<number, PlayerState>,
+  inning: number,
+  assignments: Record<Position, number>,
+  lockedAssignments: Record<Position, number>,
+  forcedOnFieldPlayers: Set<number>,
+  playerId: number,
+) {
+  const player = players.find((entry) => entry.id === playerId)
+  const playerState = playerStates.get(playerId)
+  if (!player || !playerState) return `Joueur ${playerId}: contraintes non satisfaites.`
+
+  const lockedPitcherId = getLockedPitcherId(playerStates, rules, inning)
+  const playersById = Object.fromEntries(players.map((entry) => [entry.id, entry]))
+  const incompatibleSlots: string[] = []
+  const blockedCompatibleSlots: string[] = []
+  let hasSwappableCompatibleSlot = false
+
+  for (const position of FIELD_POSITIONS) {
+    const lockOwnerId = lockedAssignments[position]
+    const directReason = getBenchViolationReason(player, position, rules, playerState, lockedPitcherId, lockOwnerId)
+
+    if (directReason) {
+      incompatibleSlots.push(`${position}: ${directReason}`)
+      continue
+    }
+
+    const currentPlayerId = assignments[position]
+    if (currentPlayerId === undefined) {
+      hasSwappableCompatibleSlot = true
+      continue
+    }
+
+    const currentPlayer = playersById[currentPlayerId]
+    const currentPlayerState = playerStates.get(currentPlayerId)
+
+    if (forcedOnFieldPlayers.has(currentPlayerId)) {
+      blockedCompatibleSlots.push(`${position}: ${currentPlayer?.name ?? `Joueur ${currentPlayerId}`} protégé (dernière manche)`) 
+      continue
+    }
+
+    if (currentPlayer?.lockedPosition && !currentPlayer.lockedCanBench) {
+      blockedCompatibleSlots.push(`${position}: ${currentPlayer.name} verrouillé sans banc`)
+      continue
+    }
+
+    if (currentPlayerState && rules.maxConsecutiveBench > 0 && currentPlayerState.benchInnings >= rules.maxConsecutiveBench) {
+      blockedCompatibleSlots.push(`${position}: ${currentPlayer?.name ?? `Joueur ${currentPlayerId}`} déjà à la limite banc`)
+      continue
+    }
+
+    hasSwappableCompatibleSlot = true
+  }
+
+  if (hasSwappableCompatibleSlot) {
+    return `${player.name}: conflit résiduel de combinaison, aucune permutation simple valide n'a été trouvée.`
+  }
+
+  if (blockedCompatibleSlots.length > 0) {
+    return `${player.name}: positions compatibles bloquées (${blockedCompatibleSlots.join(' | ')})`
+  }
+
+  if (incompatibleSlots.length > 0) {
+    return `${player.name}: aucune position disponible (${incompatibleSlots.join(' | ')})`
+  }
+
+  return `${player.name}: contraintes incompatibles.`
+}
+
 export function generateLineupLocally(
   players: Player[],
   rules: MatchRules,
@@ -497,12 +810,15 @@ export function generateLineupLocally(
   const playerIds = new Set(activePlayers.map((player) => player.id))
   const innings: InningAssignment[] = []
   const lockedOverrides = new Set(lockedOverrideKeys)
+  let playersExceedingBenchLimit = new Set<number>()
 
   for (let inning = 1; inning <= rules.inningsCount; inning += 1) {
-    const forcedOnFieldPlayers =
-      inning === rules.inningsCount
-        ? new Set(activePlayers.filter((player) => player.noBenchLastInning).map((player) => player.id))
-        : new Set<number>()
+    const forcedOnFieldPlayers = new Set<number>(playersExceedingBenchLimit)
+    if (inning === rules.inningsCount) {
+      activePlayers
+        .filter((player) => player.noBenchLastInning)
+        .forEach((player) => forcedOnFieldPlayers.add(player.id))
+    }
     const lockedAssignments = buildLockedAssignments(inning, activePlayers, rules, playerStates, manualOverrides)
     const { assignments, score, requiredOnFieldApplied, forcedOnFieldApplied } = generateBestAssignments(
       activePlayers,
@@ -527,6 +843,35 @@ export function generateLineupLocally(
         assignments[position] = overridePlayerId
       }
     }
+
+    repairBenchLimitViolations(
+      activePlayers,
+      rules,
+      playerStates,
+      inning,
+      assignments,
+      lockedAssignments,
+      forcedOnFieldPlayers,
+    )
+
+    strongEnforceForcedPlayers(
+      activePlayers,
+      rules,
+      playerStates,
+      inning,
+      assignments,
+      lockedAssignments,
+      forcedOnFieldPlayers,
+    )
+
+      absolutelyPreventDoubleBench(
+        activePlayers,
+        rules,
+        playerStates,
+        inning,
+        assignments,
+        lockedAssignments,
+      )
 
     const usedPlayers = new Set(Object.values(assignments))
     const bench = activePlayers.filter((player) => !usedPlayers.has(player.id)).map((player) => player.id)
@@ -566,8 +911,39 @@ export function generateLineupLocally(
     const catcherNote = getCatcherPriorityNote(activePlayers, { inning, assignments, bench, score, notes }, rules)
     if (catcherNote) notes.push(catcherNote)
 
+    const benchLimitForcedPlayers = Array.from(playersExceedingBenchLimit).filter(
+      (playerId) => Object.values(assignments).includes(playerId),
+    )
+    if (rules.maxConsecutiveBench > 0 && benchLimitForcedPlayers.length > 0 && inning > 1) {
+      const forcedNames = benchLimitForcedPlayers
+        .map((playerId) => activePlayers.find((p) => p.id === playerId)?.name ?? `Joueur ${playerId}`)
+        .join(', ')
+      notes.push(`Limite banc appliquée: ${forcedNames} forcé(s) en jeu pour respecter le max`)
+    }
+
     if (bench.length > 0) {
       notes.push(`Banc: ${bench.length} joueur(s)`)
+    }
+
+    const benchLimitExceededPlayers = bench
+      .filter((playerId) => (playerStates.get(playerId)?.benchInnings ?? 0) >= rules.maxConsecutiveBench)
+
+    if (rules.maxConsecutiveBench > 0 && benchLimitExceededPlayers.length > 0) {
+      if (inning === rules.inningsCount) {
+        const detailedReasons = benchLimitExceededPlayers.map((playerId) =>
+          explainBenchLimitViolation(
+            activePlayers,
+            rules,
+            playerStates,
+            inning,
+            assignments,
+            lockedAssignments,
+            forcedOnFieldPlayers,
+            playerId,
+          ),
+        )
+        notes.push(`⚠️ Limite finale dépassée (dernière manche inévitable): ${detailedReasons.join(' ; ')}`)
+      }
     }
 
     const playersStillNeedingFirstBench = activePlayers.filter((player) => {
@@ -600,6 +976,17 @@ export function generateLineupLocally(
     }
 
     innings.push({ inning, assignments, bench, score, notes })
+
+    // Accumulate players exceeding bench limit: once a player reaches the limit,
+    // they must stay forced on-field for the rest of the match
+    const newlyExceeding = activePlayers
+      .filter((player) => {
+        const state = playerStates.get(player.id)
+        return state && rules.maxConsecutiveBench > 0 && state.benchInnings >= rules.maxConsecutiveBench
+      })
+      .map((player) => player.id)
+    
+    newlyExceeding.forEach((playerId) => playersExceedingBenchLimit.add(playerId))
   }
 
   const totals = Object.fromEntries(
