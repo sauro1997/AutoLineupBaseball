@@ -632,6 +632,7 @@ function App() {
   const [matchHistory, setMatchHistory] = useState<MatchHistoryEntry[]>(initialState.matchHistory ?? [])
   const [selectedHistoryMatchId, setSelectedHistoryMatchId] = useState<string | undefined>(initialState.selectedHistoryMatchId)
   const [viewedHistoryMatchId, setViewedHistoryMatchId] = useState<string | undefined>(undefined)
+  const [editingHistoryMatchId, setEditingHistoryMatchId] = useState<string | undefined>(undefined)
   const [historyContextWindow, setHistoryContextWindow] = useState(initialState.historyContextWindow ?? 1)
   const historyContextMatches = useMemo(
     () => getHistoryContextMatches(matchHistory, selectedHistoryMatchId, historyContextWindow),
@@ -679,6 +680,7 @@ function App() {
     setMatchHistory(nextState.matchHistory ?? [])
     setSelectedHistoryMatchId(nextState.selectedHistoryMatchId)
     setViewedHistoryMatchId(undefined)
+    setEditingHistoryMatchId(undefined)
     setHistoryContextWindow(nextState.historyContextWindow ?? 1)
     setBattingOrderPlayerIds(normalizeBattingOrderPlayerIds(nextState.battingOrderPlayerIds, nextState.players))
     setPitcherChangeSelections({})
@@ -818,6 +820,7 @@ function App() {
     if (matchHistory.some((match) => match.id === viewedHistoryMatchId)) return
 
     setViewedHistoryMatchId(undefined)
+    setEditingHistoryMatchId(undefined)
   }, [matchHistory, viewedHistoryMatchId])
 
   useEffect(() => {
@@ -1230,7 +1233,43 @@ function App() {
     }
 
     setViewedHistoryMatchId(match.id)
+    setEditingHistoryMatchId(undefined)
     setStatus(`Match chargé pour visualisation: ${match.label}.`) 
+  }
+
+  function updateHistoryMatchInningPosition(matchId: string, inningNumber: number, position: Position, newPlayerId: number) {
+    setMatchHistory((current) =>
+      current.map((match) => {
+        if (match.id !== matchId) return match
+
+        const newInnings = match.lineup.innings.map((inning) => {
+          if (inning.inning !== inningNumber) return inning
+
+          const oldPlayerId = inning.assignments[position]
+          const newAssignments = { ...inning.assignments }
+
+          // Si le nouveau joueur est déjà assigné ailleurs dans cette manche, on échange
+          const existingPos = (Object.keys(newAssignments) as Position[]).find(
+            (pos) => newAssignments[pos] === newPlayerId,
+          )
+          if (existingPos) {
+            newAssignments[existingPos] = oldPlayerId
+          }
+
+          newAssignments[position] = newPlayerId
+
+          // Recalcul du bench : joueurs actifs non assignés
+          const assignedIds = new Set(Object.values(newAssignments))
+          const newBench = activePlayers.filter((p) => !assignedIds.has(p.id)).map((p) => p.id)
+
+          return { ...inning, assignments: newAssignments, bench: newBench }
+        })
+
+        const newBenchTotals = computeBenchTotals({ ...match.lineup, innings: newInnings }, activePlayers)
+
+        return { ...match, lineup: { ...match.lineup, innings: newInnings }, benchTotals: newBenchTotals }
+      }),
+    )
   }
 
   async function copyShareLink() {
@@ -2322,6 +2361,17 @@ function App() {
                     <button type="button" className="ghost" onClick={() => loadSavedMatchForReview(match.id)}>
                       Voir manches
                     </button>
+                    {viewedHistoryMatchId === match.id && (
+                      editingHistoryMatchId === match.id ? (
+                        <button type="button" className="ghost active-lock" onClick={() => setEditingHistoryMatchId(undefined)}>
+                          ✅ Terminer
+                        </button>
+                      ) : (
+                        <button type="button" className="ghost" onClick={() => setEditingHistoryMatchId(match.id)}>
+                          ✏️ Modifier
+                        </button>
+                      )
+                    )}
                     <button type="button" className="ghost danger" onClick={() => removeSavedMatch(match.id)}>
                       Supprimer
                     </button>
@@ -2471,12 +2521,31 @@ function App() {
                 <tbody>
                   {FIELD_POSITIONS.map((position) => {
                     const overrideKey = createOverrideKey(inning.inning, position)
+                    const isEditingHistory = selectedHistoryMatch !== undefined && editingHistoryMatchId === selectedHistoryMatch.id
                     return (
                       <tr key={position}>
                         <td><PosBadge position={position} /></td>
                         <td>
-                          {selectedHistoryMatch ? (
+                          {selectedHistoryMatch && !isEditingHistory ? (
                             resolvePlayerName(inning.assignments[position])
+                          ) : selectedHistoryMatch && isEditingHistory ? (
+                            <select
+                              value={inning.assignments[position]}
+                              onChange={(event) =>
+                                updateHistoryMatchInningPosition(
+                                  selectedHistoryMatch.id,
+                                  inning.inning,
+                                  position,
+                                  Number(event.target.value),
+                                )
+                              }
+                            >
+                              {activePlayers.map((player) => (
+                                <option key={player.id} value={player.id}>
+                                  {player.name}
+                                </option>
+                              ))}
+                            </select>
                           ) : (
                             <select
                               value={manualOverrides[overrideKey] ?? inning.assignments[position]}
@@ -2556,7 +2625,7 @@ function App() {
                 <strong>Primary / Secondary / Tertiary</strong> : Positions où le joueur peut jouer, avec des scores de compatibilité décroissants (100 / 70 / 40). Le moteur préfère Primary, puis Secondary, puis Tertiary.
               </li>
               <li>
-                <strong>Groupe de positions (fallback)</strong> : Si aucune position spécifique n'est libre, le moteur peut utiliser ce groupe avec un score faible (30). Options :
+                <strong>Groupe de positions (fallback)</strong> : Si aucune position spécifique n'est libre, le moteur peut utiliser ce groupe avec un score de 50 (au-dessus du Tertiary). Options :
                 <ul style={{ marginTop: '0.5rem' }}>
                   <li><strong>Infield</strong> : 1B, 2B, 3B, SS</li>
                   <li><strong>Outfield</strong> : LF, CF, RF</li>
@@ -2609,7 +2678,7 @@ function App() {
                   <li>Primary : +100</li>
                   <li>Secondary : +70</li>
                   <li>Tertiary : +40</li>
-                  <li>Groupe de positions : +30</li>
+                  <li>Groupe de positions : +50</li>
                   <li>Incompatible/Exclu : -1000</li>
                 </ul>
               </li>
