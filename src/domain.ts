@@ -84,6 +84,7 @@ export type MatchHistoryEntry = {
   createdAt: string
   lineup: LineupResult
   benchTotals: Record<number, number>
+  battingOrderPlayerIds?: number[]
 }
 
 export type ManualOverrideMap = Partial<Record<string, number>>

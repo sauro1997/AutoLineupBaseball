@@ -469,7 +469,12 @@ function computeBenchTotals(lineup: ReturnType<typeof generateLineupLocally>, pl
   return benchTotals
 }
 
-function createMatchHistoryEntry(lineup: ReturnType<typeof generateLineupLocally>, players: Player[], count: number): MatchHistoryEntry {
+function createMatchHistoryEntry(
+  lineup: ReturnType<typeof generateLineupLocally>,
+  players: Player[],
+  count: number,
+  battingOrderPlayerIds: number[],
+): MatchHistoryEntry {
   const createdAt = new Date().toISOString()
 
   return {
@@ -478,6 +483,7 @@ function createMatchHistoryEntry(lineup: ReturnType<typeof generateLineupLocally
     createdAt,
     lineup,
     benchTotals: computeBenchTotals(lineup, players),
+    battingOrderPlayerIds: normalizeBattingOrderPlayerIds(battingOrderPlayerIds, players),
   }
 }
 
@@ -718,14 +724,6 @@ function App() {
     if (isShareViewerMode) return
     if (!isSupabaseConfigured) return
 
-    if (!authUser) {
-      setDbHydrationDone(false)
-      setDbHydrationError(false)
-      return
-    }
-
-    const currentUser = authUser
-
     let cancelled = false
 
     async function hydrateFromDb() {
@@ -733,7 +731,7 @@ function App() {
       setDbHydrationError(false)
 
       try {
-        const remoteState = await loadRemoteState(currentUser.id)
+        const remoteState = await loadRemoteState(authUser?.id)
 
         if (!cancelled && remoteState) {
           const normalizedRemoteState = normalizePersistedState(remoteState)
@@ -742,7 +740,7 @@ function App() {
           setDbHydrationError(false)
         } else if (!cancelled) {
           applyPersistedState(createEmptyPersistedState())
-          setStatus('Aucune configuration trouvée pour ce coach. Crée ton équipe et elle sera sauvegardée en base.')
+          setStatus('Aucune configuration trouvée. Crée ton équipe et elle sera sauvegardée en base.')
           setDbHydrationError(false)
         }
       } catch (error) {
@@ -768,7 +766,6 @@ function App() {
   useEffect(() => {
     if (isShareViewerMode) return
     if (!isSupabaseConfigured) return
-    if (!authUser) return
     if (!dbHydrationDone) return
     if (dbHydrationError) return
 
@@ -784,7 +781,7 @@ function App() {
         historyContextWindow,
         battingOrderPlayerIds,
       }
-      void saveRemoteState(authUser.id, snapshot).catch((error) => {
+      void saveRemoteState(authUser?.id, snapshot).catch((error) => {
         const message = error instanceof Error ? error.message : 'Erreur inconnue Supabase.'
         setStatus(`Erreur de sauvegarde Supabase: ${message}`)
       })
@@ -1099,7 +1096,7 @@ function App() {
     setStatus('Ordre des frappeurs réinitialisé selon les joueurs présents.')
   }
 
-  function buildShareBattingOrderNames(lineupToShare: GeneratedLineup) {
+  function buildShareBattingOrderNames(lineupToShare: GeneratedLineup, preferredOrderIds?: number[]) {
     const playerIdsInLineup = new Set<number>()
     for (const inning of lineupToShare.innings) {
       for (const playerId of Object.values(inning.assignments)) {
@@ -1111,7 +1108,8 @@ function App() {
       }
     }
 
-    const prioritizedIds = battingOrderPlayerIds.filter((playerId) => playerIdsInLineup.has(playerId))
+    const sourceOrder = preferredOrderIds ?? battingOrderPlayerIds
+    const prioritizedIds = sourceOrder.filter((playerId) => playerIdsInLineup.has(playerId))
     const prioritizedSet = new Set(prioritizedIds)
     const remainingIds = [...playerIdsInLineup]
       .filter((playerId) => !prioritizedSet.has(playerId))
@@ -1194,13 +1192,13 @@ function App() {
   }
 
   function saveCurrentMatch() {
-    const entry = createMatchHistoryEntry(lineup, players, matchHistory.length)
+    const entry = createMatchHistoryEntry(lineup, players, matchHistory.length, battingOrderPlayerIds)
     setMatchHistory((current) => [entry, ...current])
     setSelectedHistoryMatchId(entry.id)
     setViewedHistoryMatchId(undefined)
 
-    if (isSupabaseConfigured && authUser) {
-      void saveMatchHistoryEntry(authUser.id, team, entry).catch((error) => {
+    if (isSupabaseConfigured) {
+      void saveMatchHistoryEntry(authUser?.id, team, entry).catch((error) => {
         const message = error instanceof Error ? error.message : 'Erreur inconnue Supabase.'
         setStatus(`Erreur de sauvegarde du match dans Supabase: ${message}`)
       })
@@ -1225,6 +1223,10 @@ function App() {
     if (!match) {
       setStatus('Match introuvable dans l’historique.')
       return
+    }
+
+    if (match.battingOrderPlayerIds && match.battingOrderPlayerIds.length > 0) {
+      setBattingOrderPlayerIds(normalizeBattingOrderPlayerIds(match.battingOrderPlayerIds, players))
     }
 
     setViewedHistoryMatchId(match.id)
@@ -1265,6 +1267,9 @@ function App() {
       matchDate = selectedMatch.createdAt
     }
 
+    const selectedSavedMatch = selectedOption === 1 ? undefined : matchHistory[selectedOption - 2]
+    const shareOrderIds = selectedSavedMatch?.battingOrderPlayerIds ?? battingOrderPlayerIds
+
     if (lineupToShare.innings.length === 0) {
       setStatus('Aucune manche à partager pour le match choisi.')
       return
@@ -1275,7 +1280,7 @@ function App() {
       teamName: team.name.trim() || 'Équipe',
       matchLabel,
       matchDate,
-      battingOrder: buildShareBattingOrderNames(lineupToShare),
+      battingOrder: buildShareBattingOrderNames(lineupToShare, shareOrderIds),
       innings: lineupToShare.innings.map((inning) => ({
         inning: inning.inning,
         score: inning.score,
@@ -1287,10 +1292,10 @@ function App() {
       })),
     }
 
-    // Create share link in database if authenticated
-    if (isSupabaseConfigured && authUser) {
+    // Create short share link in database when Supabase is available.
+    if (isSupabaseConfigured) {
       try {
-        const shareId = await createShareLink(authUser.id, team, payload)
+        const shareId = await createShareLink(authUser?.id, team, payload)
         const link = `${window.location.origin}${window.location.pathname}?id=${shareId}`
         await window.navigator.clipboard.writeText(link)
         setStatus(`Lien court copié: ${shareId}`)
@@ -1306,7 +1311,7 @@ function App() {
     const encodedPayload = encodeShareViewPayload(payload)
     const link = `${window.location.origin}${window.location.pathname}?view=${encodedPayload}`
     await window.navigator.clipboard.writeText(link)
-    setStatus('Lien viewer des manches copié dans le presse-papiers (lien long - connecte-toi pour un lien court).')
+    setStatus('Lien viewer des manches copié dans le presse-papiers (lien long).')
   }
 
   async function handleRegister() {
@@ -1370,10 +1375,7 @@ function App() {
     setAuthUser(null)
     setAuthPassword('')
     setAuthError(null)
-    applyPersistedState(createEmptyPersistedState())
-    setDbHydrationDone(!isSupabaseConfigured)
-    setDbHydrationError(false)
-    setStatus('Session locale fermée.')
+    setStatus('Session fermée. Mode invité actif.')
   }
 
   async function copySummary() {
@@ -1623,8 +1625,6 @@ function App() {
     )
   }
 
-  const requiresAuthBeforeEditing = isSupabaseConfigured && !authUser
-
   return (
     <div className="app-shell">
       <header className="hero-card">
@@ -1655,6 +1655,8 @@ function App() {
             </>
           ) : (
             <>
+              <p className="status-chip">Mode invité actif (connexion optionnelle).</p>
+              <p className="status-chip">{dbHydrationDone ? 'Sync active' : 'Chargement DB en cours...'}</p>
               <label>
                 Email
                 <input
@@ -1724,19 +1726,7 @@ function App() {
         </div>
       </header>
 
-      {requiresAuthBeforeEditing ? (
-        <section className="panel">
-          <div className="panel-heading">
-            <div>
-              <p className="eyebrow">🔒 Accès requis</p>
-              <h2>Connecte-toi pour modifier l'équipe</h2>
-              <p style={{ fontSize: '0.9rem', color: 'var(--muted, #666)', marginTop: '0.5rem' }}>
-                La modification des joueurs, règles et lineups est verrouillée jusqu'à la connexion.
-              </p>
-            </div>
-          </div>
-        </section>
-      ) : importPreview ? (
+      {importPreview ? (
         <section className="panel" style={{ backgroundColor: 'rgba(33, 150, 243, 0.05)', borderColor: 'rgba(33, 150, 243, 0.3)' }}>
           <div className="panel-heading">
             <div>

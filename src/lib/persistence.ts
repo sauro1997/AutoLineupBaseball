@@ -66,6 +66,7 @@ type MatchHistoryRow = {
   label: string
   lineup_json: MatchHistoryEntry['lineup']
   bench_totals: MatchHistoryEntry['benchTotals'] | null
+  batting_order_player_ids: number[] | null
   created_at: string
 }
 
@@ -75,12 +76,64 @@ type TeamSelectionCandidate = TeamRow & {
   player_count: number
 }
 
+const GUEST_USER_EMAIL = 'guest@autolineup.local'
+const GUEST_USER_PASSWORD = 'guest'
+
+let guestUserIdCache: number | null = null
+
 function getSupabase() {
   if (!supabase) {
     throw new Error('Supabase non configure: ajoute VITE_SUPABASE_URL et VITE_SUPABASE_ANON_KEY.')
   }
 
   return supabase
+}
+
+async function resolveUserId(userId?: number): Promise<number> {
+  if (typeof userId === 'number' && Number.isFinite(userId) && userId > 0) {
+    return userId
+  }
+
+  if (guestUserIdCache) {
+    return guestUserIdCache
+  }
+
+  const db = getSupabase()
+  const { data: existingGuest, error: existingGuestError } = await db
+    .from('users_bb')
+    .select('id')
+    .eq('email', GUEST_USER_EMAIL)
+    .maybeSingle<{ id: number }>()
+
+  if (existingGuestError) throw existingGuestError
+
+  if (existingGuest) {
+    guestUserIdCache = existingGuest.id
+    return existingGuest.id
+  }
+
+  const { data: createdGuest, error: createdGuestError } = await db
+    .from('users_bb')
+    .insert({ email: GUEST_USER_EMAIL, password: GUEST_USER_PASSWORD })
+    .select('id')
+    .single<{ id: number }>()
+
+  if (createdGuestError) {
+    const { data: raceWinner, error: raceWinnerError } = await db
+      .from('users_bb')
+      .select('id')
+      .eq('email', GUEST_USER_EMAIL)
+      .maybeSingle<{ id: number }>()
+
+    if (raceWinnerError) throw raceWinnerError
+    if (!raceWinner) throw createdGuestError
+
+    guestUserIdCache = raceWinner.id
+    return raceWinner.id
+  }
+
+  guestUserIdCache = createdGuest.id
+  return createdGuest.id
 }
 
 function normalizeManualOverrides(
@@ -400,6 +453,7 @@ async function syncMatchHistory(teamId: number, matchHistory: MatchHistoryEntry[
     label: entry.label,
     lineup_json: toDbLineup(entry.lineup, playerIdMap),
     bench_totals: toDbBenchTotals(entry.benchTotals, playerIdMap),
+    batting_order_player_ids: toDbBattingOrderPlayerIds(entry.battingOrderPlayerIds ?? [], playerIdMap),
     created_at: entry.createdAt,
   }))
 
@@ -444,13 +498,14 @@ export async function loginUser(email: string, password: string): Promise<Sessio
   }
 }
 
-export async function loadRemoteState(userId: number): Promise<PersistedAppState | null> {
+export async function loadRemoteState(userId?: number): Promise<PersistedAppState | null> {
   const db = getSupabase()
+  const resolvedUserId = await resolveUserId(userId)
 
   const { data: teams, error: teamError } = await db
     .from('teams_bb')
     .select('id,name,logo_url,created_at')
-    .eq('user_id', userId)
+    .eq('user_id', resolvedUserId)
     .order('id', { ascending: false })
 
   if (teamError) throw teamError
@@ -499,7 +554,7 @@ export async function loadRemoteState(userId: number): Promise<PersistedAppState
         .maybeSingle<RulesRow>(),
       db
         .from('match_history_bb')
-        .select('client_match_id,label,lineup_json,bench_totals,created_at')
+        .select('client_match_id,label,lineup_json,bench_totals,batting_order_player_ids,created_at')
         .eq('team_id', team.id)
         .order('created_at', { ascending: false }),
     ])
@@ -539,6 +594,7 @@ export async function loadRemoteState(userId: number): Promise<PersistedAppState
     createdAt: entry.created_at,
     lineup: entry.lineup_json,
     benchTotals: entry.bench_totals ?? {},
+    battingOrderPlayerIds: normalizeBattingOrderPlayerIds(entry.batting_order_player_ids),
   }))
 
   return {
@@ -558,7 +614,7 @@ export async function loadRemoteState(userId: number): Promise<PersistedAppState
   }
 }
 
-export async function importLocalStateIfRemoteEmpty(userId: number, localState: PersistedAppState): Promise<boolean> {
+export async function importLocalStateIfRemoteEmpty(userId: number | undefined, localState: PersistedAppState): Promise<boolean> {
   const remote = await loadRemoteState(userId)
   if (remote) return false
 
@@ -566,8 +622,9 @@ export async function importLocalStateIfRemoteEmpty(userId: number, localState: 
   return true
 }
 
-export async function saveRemoteState(userId: number, state: PersistedAppState): Promise<void> {
-  const team = await getOrCreateTeam(userId, state.team)
+export async function saveRemoteState(userId: number | undefined, state: PersistedAppState): Promise<void> {
+  const resolvedUserId = await resolveUserId(userId)
+  const team = await getOrCreateTeam(resolvedUserId, state.team)
   const playerIdMap = await replacePlayers(team.id, state.players)
 
   await syncRules(
@@ -583,8 +640,9 @@ export async function saveRemoteState(userId: number, state: PersistedAppState):
   await syncMatchHistory(team.id, state.matchHistory ?? [], playerIdMap)
 }
 
-export async function saveMatchHistoryEntry(userId: number, team: Team, entry: MatchHistoryEntry): Promise<void> {
-  const dbTeam = await getOrCreateTeam(userId, team)
+export async function saveMatchHistoryEntry(userId: number | undefined, team: Team, entry: MatchHistoryEntry): Promise<void> {
+  const resolvedUserId = await resolveUserId(userId)
+  const dbTeam = await getOrCreateTeam(resolvedUserId, team)
   const db = getSupabase()
 
   const { error } = await db.from('match_history_bb').upsert(
@@ -594,6 +652,7 @@ export async function saveMatchHistoryEntry(userId: number, team: Team, entry: M
       label: entry.label,
       lineup_json: entry.lineup,
       bench_totals: entry.benchTotals,
+      batting_order_player_ids: entry.battingOrderPlayerIds ?? [],
       created_at: entry.createdAt,
     },
     { onConflict: 'team_id,client_match_id' },
@@ -612,9 +671,10 @@ function generateShareId(): string {
   return id
 }
 
-export async function createShareLink(userId: number, team: Team, payload: ShareViewPayload): Promise<string> {
+export async function createShareLink(userId: number | undefined, team: Team, payload: ShareViewPayload): Promise<string> {
   const db = getSupabase()
-  const dbTeam = await getOrCreateTeam(userId, team)
+  const resolvedUserId = await resolveUserId(userId)
+  const dbTeam = await getOrCreateTeam(resolvedUserId, team)
 
   let shareId = generateShareId()
   let attempts = 0
