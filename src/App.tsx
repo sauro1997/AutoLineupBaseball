@@ -51,6 +51,7 @@ type ShareViewPayload = {
   teamName: string
   matchLabel: string
   matchDate: string
+  battingOrder: string[]
   innings: ShareViewInning[]
 }
 
@@ -156,6 +157,7 @@ function createEmptyPersistedState(): PersistedAppState {
     matchHistory: [],
     selectedHistoryMatchId: undefined,
     historyContextWindow: 1,
+    battingOrderPlayerIds: [],
   }
 }
 
@@ -350,11 +352,16 @@ function decodeShareViewPayload(encoded: string): ShareViewPayload | null {
 
     if (innings.length !== parsed.innings.length) return null
 
+    const battingOrder = Array.isArray(parsed.battingOrder)
+      ? parsed.battingOrder.filter((name): name is string => typeof name === 'string' && name.trim().length > 0)
+      : []
+
     return {
       version: 1,
       teamName: parsed.teamName,
       matchLabel: parsed.matchLabel,
       matchDate: parsed.matchDate,
+      battingOrder,
       innings,
     }
   } catch {
@@ -488,6 +495,29 @@ function isActivePlayer(player: Player) {
   return player.flexibilityLevel !== 'absent'
 }
 
+function normalizeBattingOrderPlayerIds(
+  battingOrderPlayerIds: number[] | undefined,
+  players: Player[],
+): number[] {
+  const activePlayerIds = players.filter((player) => isActivePlayer(player)).map((player) => player.id)
+  const activePlayerIdSet = new Set(activePlayerIds)
+  const normalized: number[] = []
+
+  for (const playerId of battingOrderPlayerIds ?? []) {
+    const normalizedPlayerId = normalizeNumericId(playerId)
+    if (!activePlayerIdSet.has(normalizedPlayerId)) continue
+    if (normalized.includes(normalizedPlayerId)) continue
+    normalized.push(normalizedPlayerId)
+  }
+
+  for (const playerId of activePlayerIds) {
+    if (normalized.includes(playerId)) continue
+    normalized.push(playerId)
+  }
+
+  return normalized
+}
+
 function normalizePersistedState(state: PersistedAppState): PersistedAppState {
   const team: Team = {
     ...state.team,
@@ -505,6 +535,7 @@ function normalizePersistedState(state: PersistedAppState): PersistedAppState {
       id: normalizeNumericId(player.id) || index + 1,
       teamId: normalizeNumericId(player.teamId) || team.id,
       lockedCanBench: player.lockedPosition ? player.lockedCanBench ?? true : false,
+      noBenchLastInning: Boolean(player.noBenchLastInning),
       excludedPositions: normalizeExcludedPositions(player.excludedPositions),
       positions: {
         ...player.positions,
@@ -550,6 +581,7 @@ function normalizePersistedState(state: PersistedAppState): PersistedAppState {
     })),
     selectedHistoryMatchId: state.selectedHistoryMatchId,
     historyContextWindow: [1, 2, 3].includes(state.historyContextWindow ?? 1) ? state.historyContextWindow : 1,
+    battingOrderPlayerIds: normalizeBattingOrderPlayerIds(state.battingOrderPlayerIds, players),
   }
 }
 
@@ -572,6 +604,7 @@ function App() {
   const [pitcherChangeSelections, setPitcherChangeSelections] = useState<Record<number, number>>({})
   const [matchHistory, setMatchHistory] = useState<MatchHistoryEntry[]>(initialState.matchHistory ?? [])
   const [selectedHistoryMatchId, setSelectedHistoryMatchId] = useState<string | undefined>(initialState.selectedHistoryMatchId)
+  const [viewedHistoryMatchId, setViewedHistoryMatchId] = useState<string | undefined>(undefined)
   const [historyContextWindow, setHistoryContextWindow] = useState(initialState.historyContextWindow ?? 1)
   const historyContextMatches = useMemo(
     () => getHistoryContextMatches(matchHistory, selectedHistoryMatchId, historyContextWindow),
@@ -582,8 +615,8 @@ function App() {
     [historyContextMatches],
   )
   const selectedHistoryMatch = useMemo(
-    () => matchHistory.find((match) => match.id === selectedHistoryMatchId),
-    [matchHistory, selectedHistoryMatchId],
+    () => matchHistory.find((match) => match.id === viewedHistoryMatchId),
+    [matchHistory, viewedHistoryMatchId],
   )
   const activePlayers = useMemo(
     () => players.filter((player) => isActivePlayer(player)),
@@ -598,11 +631,15 @@ function App() {
   const [authError, setAuthError] = useState<string | null>(null)
   const [playerSearchQuery, setPlayerSearchQuery] = useState('')
   const [dbHydrationDone, setDbHydrationDone] = useState(!isSupabaseConfigured)
+  const [dbHydrationError, setDbHydrationError] = useState(false)
   const [importPreview, setImportPreview] = useState<ImportLineupPreview | null>(null)
   const [importLineupData, setImportLineupData] = useState<ExportedLineup | null>(null)
   const [importError, setImportError] = useState<string | null>(null)
   const [printTargetMatchId, setPrintTargetMatchId] = useState<string | 'current'>('current')
   const [shareViewPayload, setShareViewPayload] = useState<ShareViewPayload | null>(null)
+  const [battingOrderPlayerIds, setBattingOrderPlayerIds] = useState<number[]>(
+    initialState.battingOrderPlayerIds ?? [],
+  )
 
   const isShareViewerMode = shareViewPayload !== null
 
@@ -614,7 +651,9 @@ function App() {
     setLockedOverrides(nextState.lockedOverrides)
     setMatchHistory(nextState.matchHistory ?? [])
     setSelectedHistoryMatchId(nextState.selectedHistoryMatchId)
+    setViewedHistoryMatchId(undefined)
     setHistoryContextWindow(nextState.historyContextWindow ?? 1)
+    setBattingOrderPlayerIds(normalizeBattingOrderPlayerIds(nextState.battingOrderPlayerIds, nextState.players))
     setPitcherChangeSelections({})
     setLineup(generateLineupFromState(nextState))
   }
@@ -653,6 +692,7 @@ function App() {
 
     if (!authUser) {
       setDbHydrationDone(false)
+      setDbHydrationError(false)
       return
     }
 
@@ -662,6 +702,7 @@ function App() {
 
     async function hydrateFromDb() {
       setDbHydrationDone(false)
+      setDbHydrationError(false)
 
       try {
         const remoteState = await loadRemoteState(currentUser.id)
@@ -670,14 +711,17 @@ function App() {
           const normalizedRemoteState = normalizePersistedState(remoteState)
           applyPersistedState(normalizedRemoteState)
           setStatus('Configuration chargée depuis Supabase.')
+          setDbHydrationError(false)
         } else if (!cancelled) {
           applyPersistedState(createEmptyPersistedState())
           setStatus('Aucune configuration trouvée pour ce coach. Crée ton équipe et elle sera sauvegardée en base.')
+          setDbHydrationError(false)
         }
       } catch (error) {
         if (!cancelled) {
           const message = error instanceof Error ? error.message : 'Erreur inconnue Supabase.'
-          setStatus(`Erreur de chargement Supabase: ${message}`)
+          setStatus(`Erreur de chargement Supabase: ${message}. Sauvegarde auto suspendue pour eviter toute perte de donnees.`)
+          setDbHydrationError(true)
         }
       } finally {
         if (!cancelled) {
@@ -698,6 +742,7 @@ function App() {
     if (!isSupabaseConfigured) return
     if (!authUser) return
     if (!dbHydrationDone) return
+    if (dbHydrationError) return
 
     const handle = window.setTimeout(() => {
       const snapshot: PersistedAppState = {
@@ -709,6 +754,7 @@ function App() {
         matchHistory,
         selectedHistoryMatchId,
         historyContextWindow,
+        battingOrderPlayerIds,
       }
       void saveRemoteState(authUser.id, snapshot).catch((error) => {
         const message = error instanceof Error ? error.message : 'Erreur inconnue Supabase.'
@@ -722,6 +768,7 @@ function App() {
   }, [
     authUser,
     dbHydrationDone,
+    dbHydrationError,
     isShareViewerMode,
     team,
     players,
@@ -731,6 +778,7 @@ function App() {
     matchHistory,
     selectedHistoryMatchId,
     historyContextWindow,
+    battingOrderPlayerIds,
   ])
 
   useEffect(() => {
@@ -739,6 +787,13 @@ function App() {
 
     setSelectedHistoryMatchId(undefined)
   }, [matchHistory, selectedHistoryMatchId])
+
+  useEffect(() => {
+    if (!viewedHistoryMatchId) return
+    if (matchHistory.some((match) => match.id === viewedHistoryMatchId)) return
+
+    setViewedHistoryMatchId(undefined)
+  }, [matchHistory, viewedHistoryMatchId])
 
   useEffect(() => {
     let disposed = false
@@ -859,6 +914,24 @@ function App() {
     })
   }, [playerSearchQuery, players])
 
+  useEffect(() => {
+    setBattingOrderPlayerIds((current) => {
+      const normalized = normalizeBattingOrderPlayerIds(current, players)
+      if (normalized.length === current.length && normalized.every((playerId, index) => playerId === current[index])) {
+        return current
+      }
+
+      return normalized
+    })
+  }, [players])
+
+  const battingOrderPlayers = useMemo(
+    () => battingOrderPlayerIds.map((playerId) => players.find((player) => player.id === playerId)).filter(
+      (player): player is Player => !!player && isActivePlayer(player),
+    ),
+    [battingOrderPlayerIds, players],
+  )
+
   const printTargetMatch = useMemo(
     () => (printTargetMatchId === 'current' ? undefined : matchHistory.find((match) => match.id === printTargetMatchId)),
     [matchHistory, printTargetMatchId],
@@ -934,6 +1007,7 @@ function App() {
       positions: { primary: ['1B'], secondary: [], tertiary: [], general: ['all_fields'] },
       flexibilityLevel: 'starter',
       excludedPositions: [],
+      noBenchLastInning: false,
     }
 
     setPlayers((currentPlayers) => [...currentPlayers, newPlayer])
@@ -976,6 +1050,48 @@ function App() {
     setStatus('Joueur retiré du roster.')
   }
 
+  function moveBatter(playerId: number, direction: 'up' | 'down') {
+    setBattingOrderPlayerIds((current) => {
+      const index = current.indexOf(playerId)
+      if (index === -1) return current
+
+      const targetIndex = direction === 'up' ? index - 1 : index + 1
+      if (targetIndex < 0 || targetIndex >= current.length) return current
+
+      const next = [...current]
+      const [moved] = next.splice(index, 1)
+      next.splice(targetIndex, 0, moved)
+      return next
+    })
+  }
+
+  function resetBattingOrder() {
+    const nextOrder = normalizeBattingOrderPlayerIds([], players)
+    setBattingOrderPlayerIds(nextOrder)
+    setStatus('Ordre des frappeurs réinitialisé selon les joueurs présents.')
+  }
+
+  function buildShareBattingOrderNames(lineupToShare: GeneratedLineup) {
+    const playerIdsInLineup = new Set<number>()
+    for (const inning of lineupToShare.innings) {
+      for (const playerId of Object.values(inning.assignments)) {
+        playerIdsInLineup.add(playerId)
+      }
+
+      for (const playerId of inning.bench) {
+        playerIdsInLineup.add(playerId)
+      }
+    }
+
+    const prioritizedIds = battingOrderPlayerIds.filter((playerId) => playerIdsInLineup.has(playerId))
+    const prioritizedSet = new Set(prioritizedIds)
+    const remainingIds = [...playerIdsInLineup]
+      .filter((playerId) => !prioritizedSet.has(playerId))
+      .sort((left, right) => resolvePlayerName(left).localeCompare(resolvePlayerName(right), 'fr-CA'))
+
+    return [...prioritizedIds, ...remainingIds].map((playerId) => resolvePlayerName(playerId))
+  }
+
   function updateOverride(inning: number, position: Position, playerId?: number) {
     const key = createOverrideKey(inning, position)
     setManualOverrides((current) => {
@@ -1005,6 +1121,7 @@ function App() {
 
     const generated = generateLineupLocally(players, rules, manualOverrides, lockedOverrides, previousMatchContext)
     setLineup(generated)
+    setViewedHistoryMatchId(undefined)
     setStatus(
       historyContextMatches.length > 0
         ? `Alignement généré avec l'équité des ${historyContextMatches.length} dernier(s) match(s) sélectionné(s).`
@@ -1052,6 +1169,7 @@ function App() {
     const entry = createMatchHistoryEntry(lineup, players, matchHistory.length)
     setMatchHistory((current) => [entry, ...current])
     setSelectedHistoryMatchId(entry.id)
+    setViewedHistoryMatchId(undefined)
 
     if (isSupabaseConfigured && authUser) {
       void saveMatchHistoryEntry(authUser.id, team, entry).catch((error) => {
@@ -1081,22 +1199,55 @@ function App() {
       return
     }
 
-    setSelectedHistoryMatchId(match.id)
+    setViewedHistoryMatchId(match.id)
     setStatus(`Match chargé pour visualisation: ${match.label}.`) 
   }
 
   async function copyShareLink() {
-    const lineupToShare = selectedHistoryMatch?.lineup ?? lineup
+    // Préparer les options
+    const options = [
+      'Pour quel match veux-tu copier le lien ?',
+      '1) Match en cours',
+      ...matchHistory.map(
+        (match, index) => `${index + 2}) ${match.label} · ${new Date(match.createdAt).toLocaleDateString('fr-CA')}`
+      ),
+    ]
+
+    const rawChoice = window.prompt(options.join('\n'), '1')
+    if (rawChoice === null) return
+
+    const selectedOption = Number(rawChoice.trim())
+    if (!Number.isInteger(selectedOption) || selectedOption < 1 || selectedOption > matchHistory.length + 1) {
+      setStatus('Choix de match invalide. Réessaie avec le numéro affiché.')
+      return
+    }
+
+    let lineupToShare: GeneratedLineup
+    let matchLabel: string
+    let matchDate: string
+
+    if (selectedOption === 1) {
+      lineupToShare = lineup
+      matchLabel = 'Match en cours'
+      matchDate = new Date().toISOString()
+    } else {
+      const selectedMatch = matchHistory[selectedOption - 2]
+      lineupToShare = selectedMatch.lineup
+      matchLabel = selectedMatch.label
+      matchDate = selectedMatch.createdAt
+    }
+
     if (lineupToShare.innings.length === 0) {
-      setStatus('Aucune manche à partager pour le moment.')
+      setStatus('Aucune manche à partager pour le match choisi.')
       return
     }
 
     const payload: ShareViewPayload = {
       version: 1,
       teamName: team.name.trim() || 'Équipe',
-      matchLabel: selectedHistoryMatch?.label ?? 'Match en cours',
-      matchDate: selectedHistoryMatch?.createdAt ?? new Date().toISOString(),
+      matchLabel,
+      matchDate,
+      battingOrder: buildShareBattingOrderNames(lineupToShare),
       innings: lineupToShare.innings.map((inning) => ({
         inning: inning.inning,
         score: inning.score,
@@ -1177,6 +1328,7 @@ function App() {
     setAuthError(null)
     applyPersistedState(createEmptyPersistedState())
     setDbHydrationDone(!isSupabaseConfigured)
+    setDbHydrationError(false)
     setStatus('Session locale fermée.')
   }
 
@@ -1371,6 +1523,19 @@ function App() {
             <span>
               {shareViewPayload.teamName} · {new Date(shareViewPayload.matchDate).toLocaleString('fr-CA')}
             </span>
+          </div>
+
+          <div className="share-batting-order">
+            <h3>Ordre des frappeurs ({shareViewPayload.battingOrder.length})</h3>
+            {shareViewPayload.battingOrder.length > 0 ? (
+              <ol>
+                {shareViewPayload.battingOrder.map((playerName, index) => (
+                  <li key={`share-batting-${index}-${playerName}`}>{playerName}</li>
+                ))}
+              </ol>
+            ) : (
+              <p>Aucun ordre des frappeurs défini.</p>
+            )}
           </div>
 
           <div className="lineup-grid">
@@ -1713,6 +1878,21 @@ function App() {
                     </select>
                   </label>
                   <label>
+                    Derniere manche: pas de banc
+                    <select
+                      value={player.noBenchLastInning ? 'yes' : 'no'}
+                      onChange={(event) =>
+                        updatePlayer(player.id, (current) => ({
+                          ...current,
+                          noBenchLastInning: event.target.value === 'yes',
+                        }))
+                      }
+                    >
+                      <option value="no">Non</option>
+                      <option value="yes">Oui</option>
+                    </select>
+                  </label>
+                  <label>
                     Lock global
                     <select
                       value={player.lockedPosition ?? ''}
@@ -1986,6 +2166,52 @@ function App() {
                 }}
               />
             </label>
+          </div>
+
+          <div className="batting-order-panel">
+            <div className="batting-order-header">
+              <div>
+                <p className="eyebrow">🥎 Ordre des frappeurs</p>
+                <h3>Ordre de frappe personnalisé</h3>
+                <p>
+                  Tous les joueurs présents peuvent frapper. L’ordre n’est pas limité à 9.
+                </p>
+              </div>
+              <button type="button" className="ghost" onClick={resetBattingOrder}>
+                Réinitialiser
+              </button>
+            </div>
+
+            {battingOrderPlayers.length === 0 ? (
+              <p className="match-history-note">Aucun joueur présent pour définir un ordre de frappe.</p>
+            ) : (
+              <ol className="batting-order-list">
+                {battingOrderPlayers.map((player, index) => (
+                  <li key={`batting-${player.id}`} className="batting-order-item">
+                    <span className="batting-order-rank">{index + 1}.</span>
+                    <span className="batting-order-name">{player.name || `Joueur ${player.id}`}</span>
+                    <div className="batting-order-actions">
+                      <button
+                        type="button"
+                        className="ghost"
+                        onClick={() => moveBatter(player.id, 'up')}
+                        disabled={index === 0}
+                      >
+                        Monter
+                      </button>
+                      <button
+                        type="button"
+                        className="ghost"
+                        onClick={() => moveBatter(player.id, 'down')}
+                        disabled={index === battingOrderPlayers.length - 1}
+                      >
+                        Descendre
+                      </button>
+                    </div>
+                  </li>
+                ))}
+              </ol>
+            )}
           </div>
 
         </article>

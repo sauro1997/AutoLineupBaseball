@@ -543,6 +543,109 @@ button.active-lock:hover {
   gap: 0.85rem;
 }
 
+.batting-order-panel {
+  margin-top: 1rem;
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  padding: 1rem;
+  background: rgba(255, 255, 255, 0.02);
+  display: grid;
+  gap: 0.75rem;
+}
+
+.batting-order-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 0.8rem;
+}
+
+.batting-order-header h3 {
+  margin: 0.2rem 0 0;
+  font-family: var(--font-display);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 0.92rem;
+}
+
+.batting-order-header p {
+  margin: 0.25rem 0 0;
+  color: var(--color-text-muted);
+  font-size: 0.83rem;
+}
+
+.batting-order-list {
+  margin: 0;
+  padding-left: 0;
+  list-style: none;
+  display: grid;
+  gap: 0.5rem;
+}
+
+.batting-order-item {
+  border: 1px solid var(--color-border);
+  border-radius: 9px;
+  background: var(--color-surface-deep);
+  padding: 0.55rem 0.65rem;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.65rem;
+}
+
+.batting-order-rank {
+  font-family: var(--font-display);
+  color: var(--color-green-bright);
+  font-size: 0.82rem;
+  letter-spacing: 0.08em;
+}
+
+.batting-order-name {
+  color: var(--color-text);
+  font-size: 0.9rem;
+}
+
+.batting-order-actions {
+  display: flex;
+  gap: 0.4rem;
+}
+
+.batting-order-actions button {
+  padding: 0.4rem 0.65rem;
+  font-size: 0.68rem;
+}
+
+.share-batting-order {
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  padding: 0.75rem 0.85rem;
+  margin-bottom: 1rem;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.share-batting-order h3 {
+  margin: 0;
+  font-family: var(--font-display);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 0.78rem;
+  color: var(--color-text-muted);
+}
+
+.share-batting-order p {
+  margin: 0.5rem 0 0;
+  color: var(--color-text-dim);
+  font-size: 0.82rem;
+}
+
+.share-batting-order ol {
+  margin: 0.55rem 0 0;
+  padding-left: 1.2rem;
+  color: var(--color-text);
+  display: grid;
+  gap: 0.25rem;
+}
+
 .displayed-match-banner {
   margin-bottom: 1rem;
   border-radius: 10px;
@@ -821,6 +924,16 @@ td button {
   box-shadow: 0 6px 28px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(76, 175, 80, 0.1);
 }
 
+.inning-card.fallback-warning {
+  border-top-color: #f59e0b;
+  box-shadow: 0 6px 28px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(245, 158, 11, 0.3);
+}
+
+.inning-card.fallback-warning:hover {
+  border-top-color: #fbbf24;
+  box-shadow: 0 6px 28px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(251, 191, 36, 0.45);
+}
+
 .inning-card-header {
   margin-bottom: 0.25rem;
 }
@@ -1040,6 +1153,19 @@ td button {
 
   .pitcher-change-controls {
     align-items: stretch;
+  }
+
+  .batting-order-header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .batting-order-actions {
+    width: 100%;
+  }
+
+  .batting-order-actions button {
+    flex: 1;
   }
 
   .pitcher-change-controls label {
@@ -1365,6 +1491,41 @@ td button {
     padding: 0.65rem;
     gap: 0.5rem;
     border-radius: 8px;
+  }
+
+  .batting-order-panel {
+    padding: 0.65rem;
+    border-radius: 8px;
+    gap: 0.5rem;
+  }
+
+  .batting-order-item {
+    grid-template-columns: auto 1fr;
+    grid-template-areas:
+      'rank name'
+      'actions actions';
+    gap: 0.45rem;
+    padding: 0.5rem 0.55rem;
+  }
+
+  .batting-order-rank {
+    grid-area: rank;
+  }
+
+  .batting-order-name {
+    grid-area: name;
+    font-size: 0.85rem;
+  }
+
+  .batting-order-actions {
+    grid-area: actions;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .batting-order-actions button {
+    min-height: 36px;
+    font-size: 0.66rem;
   }
 
   .match-history-note {

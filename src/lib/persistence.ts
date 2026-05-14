@@ -23,6 +23,7 @@ type PlayerRow = {
   excluded_positions: Player['excludedPositions'] | null
   locked_position: Player['lockedPosition'] | null
   locked_can_bench: boolean
+  no_bench_last_inning?: boolean | null
 }
 
 type RulesRow = {
@@ -40,6 +41,7 @@ type RulesRow = {
   locked_overrides: PersistedAppState['lockedOverrides'] | null
   selected_history_match_id: string | null
   history_context_window: number | null
+  batting_order_player_ids: number[] | null
 }
 
 type MatchHistoryRow = {
@@ -79,6 +81,14 @@ function normalizeManualOverrides(
 function normalizeLockedOverrides(lockedOverrides: unknown): string[] {
   if (!Array.isArray(lockedOverrides)) return []
   return lockedOverrides.filter((value): value is string => typeof value === 'string')
+}
+
+function normalizeBattingOrderPlayerIds(battingOrderPlayerIds: unknown): number[] {
+  if (!Array.isArray(battingOrderPlayerIds)) return []
+
+  return battingOrderPlayerIds.filter(
+    (value): value is number => typeof value === 'number' && Number.isFinite(value),
+  )
 }
 
 async function getOrCreateTeam(userId: number, team: Team): Promise<TeamRow> {
@@ -197,6 +207,22 @@ function toDbManualOverrides(
   ) as PersistedAppState['manualOverrides']
 }
 
+function toDbBattingOrderPlayerIds(
+  battingOrderPlayerIds: PersistedAppState['battingOrderPlayerIds'],
+  playerIdMap: PlayerIdMap,
+): number[] {
+  const ordered: number[] = []
+
+  for (const playerId of battingOrderPlayerIds ?? []) {
+    const dbPlayerId = toDbPlayerId(playerIdMap, playerId)
+    if (!dbPlayerId) continue
+    if (ordered.includes(dbPlayerId)) continue
+    ordered.push(dbPlayerId)
+  }
+
+  return ordered
+}
+
 function toDbLineup(lineup: MatchHistoryEntry['lineup'], playerIdMap: PlayerIdMap): MatchHistoryEntry['lineup'] {
   return {
     innings: lineup.innings.map((inning) => ({
@@ -256,6 +282,7 @@ async function replacePlayers(teamId: number, players: Player[]): Promise<Player
           excluded_positions: player.excludedPositions ?? [],
           locked_position: player.lockedPosition ?? null,
           locked_can_bench: player.lockedCanBench ?? false,
+          no_bench_last_inning: player.noBenchLastInning ?? false,
           updated_at: updatedAt,
         },
         { onConflict: 'team_id,name' },
@@ -288,6 +315,7 @@ async function syncRules(
   lockedOverrides: string[],
   selectedHistoryMatchId: string | undefined,
   historyContextWindow: number,
+  battingOrderPlayerIds: PersistedAppState['battingOrderPlayerIds'],
   playerIdMap: PlayerIdMap,
 ) {
   const db = getSupabase()
@@ -314,6 +342,7 @@ async function syncRules(
     locked_overrides: lockedOverrides,
     selected_history_match_id: selectedHistoryMatchId ?? null,
     history_context_window: historyContextWindow,
+    batting_order_player_ids: toDbBattingOrderPlayerIds(battingOrderPlayerIds, playerIdMap),
     updated_at: new Date().toISOString(),
   })
 
@@ -443,7 +472,7 @@ export async function loadRemoteState(userId: number): Promise<PersistedAppState
 
   const [{ data: players, error: playersError }, { data: rules, error: rulesError }, { data: history, error: historyError }] =
     await Promise.all([
-      db.from('players_bb').select('id,team_id,name,positions,flexibility_level,excluded_positions,locked_position,locked_can_bench').eq('team_id', team.id).order('id', { ascending: true }),
+      db.from('players_bb').select('*').eq('team_id', team.id).order('id', { ascending: true }),
       db
         .from('rules_bb')
         .select('*')
@@ -471,6 +500,7 @@ export async function loadRemoteState(userId: number): Promise<PersistedAppState
     excludedPositions: player.excluded_positions ?? [],
     lockedPosition: player.locked_position ?? undefined,
     lockedCanBench: player.locked_can_bench,
+    noBenchLastInning: player.no_bench_last_inning ?? false,
   }))
 
   const mappedRules: MatchRules = {
@@ -507,6 +537,7 @@ export async function loadRemoteState(userId: number): Promise<PersistedAppState
     matchHistory: mappedHistory,
     selectedHistoryMatchId: rules?.selected_history_match_id ?? undefined,
     historyContextWindow: rules?.history_context_window ?? 1,
+    battingOrderPlayerIds: normalizeBattingOrderPlayerIds(rules?.batting_order_player_ids),
   }
 }
 
@@ -529,6 +560,7 @@ export async function saveRemoteState(userId: number, state: PersistedAppState):
     state.lockedOverrides,
     state.selectedHistoryMatchId,
     state.historyContextWindow ?? 1,
+    state.battingOrderPlayerIds,
     playerIdMap,
   )
   await syncMatchHistory(team.id, state.matchHistory ?? [], playerIdMap)

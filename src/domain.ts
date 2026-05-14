@@ -38,6 +38,7 @@ export type Player = {
   excludedPositions?: Position[]
   lockedPosition?: Position
   lockedCanBench?: boolean
+  noBenchLastInning?: boolean
 }
 
 export type MatchRules = {
@@ -113,6 +114,7 @@ export type PersistedAppState = {
   matchHistory?: MatchHistoryEntry[]
   selectedHistoryMatchId?: string
   historyContextWindow?: number
+  battingOrderPlayerIds?: number[]
 }
 
 export const flexibilityWeights: Record<FlexibilityLevel, number> = {

@@ -37,6 +37,7 @@ type AssignmentSearchResult = {
   assignments: Record<Position, number>
   score: number
   requiredOnFieldApplied: boolean
+  forcedOnFieldApplied: boolean
 }
 
 const INFIELD_POSITIONS: Position[] = ['1B', '2B', '3B', 'SS']
@@ -151,7 +152,9 @@ function getLockedPitcherId(playerStates: Map<number, PlayerState>, rules: Match
   const designatedPitcherState = playerStates.get(designatedPitcherId)
   if (!designatedPitcherState) return undefined
 
-  if (designatedPitcherState.inningsPitched >= rules.maxPitcherInnings) return undefined
+  if (designatedPitcherId === rules.pitcherId && designatedPitcherState.inningsPitched >= rules.maxPitcherInnings) {
+    return undefined
+  }
 
   return designatedPitcherId
 }
@@ -168,10 +171,12 @@ function canTakePosition(
   lockedPitcherId: number | undefined,
   forcedPlayerId?: number,
 ) {
+  const isLockedPitcherException = position === 'P' && lockedPitcherId !== undefined && player.id === lockedPitcherId
+
   if (forcedPlayerId !== undefined && player.id !== forcedPlayerId) return false
-  if (player.lockedPosition && player.lockedPosition !== position) return false
+  if (player.lockedPosition && player.lockedPosition !== position && !isLockedPitcherException) return false
   if (position === 'P' && lockedPitcherId !== undefined && player.id !== lockedPitcherId) return false
-  if (position === 'P' && playerState.inningsPitched >= rules.maxPitcherInnings) return false
+  if (position === 'P' && player.id === rules.pitcherId && playerState.inningsPitched >= rules.maxPitcherInnings) return false
   if (rules.fixedCenterField) {
     const fixedForPosition = rules.fixedAssignments.find((assignment) => assignment.position === position)
     if (fixedForPosition && player.id !== fixedForPosition.playerId) return false
@@ -194,8 +199,10 @@ function generateBestAssignments(
   playerStates: Map<number, PlayerState>,
   inning: number,
   lockedAssignments: Record<Position, number>,
+  forcedOnFieldPlayers: Set<number> = new Set<number>(),
 ) : AssignmentSearchResult {
   const mandatoryReturners = mandatoryPlayers(playerStates, rules)
+  const mandatoryOnFieldPlayers = new Set<number>([...mandatoryReturners, ...forcedOnFieldPlayers])
   const lockedPitcherId = getLockedPitcherId(playerStates, rules, inning)
   const playersById = Object.fromEntries(players.map((player) => [player.id, player]))
   const sanitizedLockedAssignments = {} as Record<Position, number>
@@ -239,7 +246,7 @@ function generateBestAssignments(
 
     function search(index: number, assignments: Record<Position, number>, usedPlayers: Set<number>, score: number) {
       if (index === candidateMatrix.length) {
-        const mandatorySatisfied = [...mandatoryReturners].filter((playerId) => usedPlayers.has(playerId)).length
+        const mandatorySatisfied = [...mandatoryOnFieldPlayers].filter((playerId) => usedPlayers.has(playerId)).length
         const preferredOnFieldSatisfied = preferredOnField
           ? [...preferredOnField].filter((playerId) => usedPlayers.has(playerId)).length
           : 0
@@ -312,12 +319,29 @@ function generateBestAssignments(
     for (const { position } of candidateMatrix) {
       const forcedPlayerId = lockedAssignments[position]
       const forcedCandidate =
-        forcedPlayerId && availablePlayers.has(forcedPlayerId) && getCompatibilityScore(playersById[forcedPlayerId], position) > POSITION_SCORES.incompatible
+        forcedPlayerId &&
+        availablePlayers.has(forcedPlayerId) &&
+        canTakePosition(
+          playersById[forcedPlayerId],
+          position,
+          rules,
+          playerStates.get(forcedPlayerId)!,
+          lockedPitcherId,
+          forcedPlayerId,
+        )
           ? forcedPlayerId
           : undefined
 
       const compatibleCandidates = [...availablePlayers].filter(
-        (playerId) => getCompatibilityScore(playersById[playerId], position) > POSITION_SCORES.incompatible,
+        (playerId) =>
+          canTakePosition(
+            playersById[playerId],
+            position,
+            rules,
+            playerStates.get(playerId)!,
+            lockedPitcherId,
+            forcedPlayerId,
+          ),
       )
 
       const selectedPlayerId = forcedCandidate
@@ -325,8 +349,8 @@ function generateBestAssignments(
         : compatibleCandidates.sort((left, right) => {
             const leftPlayer = playersById[left]
             const rightPlayer = playersById[right]
-            const leftMandatory = mandatoryReturners.has(left) ? 1 : 0
-            const rightMandatory = mandatoryReturners.has(right) ? 1 : 0
+            const leftMandatory = mandatoryOnFieldPlayers.has(left) ? 1 : 0
+            const rightMandatory = mandatoryOnFieldPlayers.has(right) ? 1 : 0
             if (leftMandatory !== rightMandatory) return rightMandatory - leftMandatory
             const leftPreviousBench = playerStates.get(left)!.previousMatchAverageBenchInnings
             const rightPreviousBench = playerStates.get(right)!.previousMatchAverageBenchInnings
@@ -347,6 +371,7 @@ function generateBestAssignments(
           assignments: normalState.bestAssignments ?? ({} as Record<Position, number>),
           score: partialScore,
           requiredOnFieldApplied: false,
+          forcedOnFieldApplied: false,
         }
       }
 
@@ -363,6 +388,9 @@ function generateBestAssignments(
       assignments: fallbackAssignments,
       score: fallbackScore,
       requiredOnFieldApplied: false,
+      forcedOnFieldApplied:
+        forcedOnFieldPlayers.size === 0 ||
+        [...forcedOnFieldPlayers].every((playerId) => Object.values(fallbackAssignments).includes(playerId)),
     }
   }
 
@@ -370,6 +398,9 @@ function generateBestAssignments(
     assignments: normalState.bestAssignments,
     score: normalState.bestScore,
     requiredOnFieldApplied: strictBenchPriorityApplied,
+    forcedOnFieldApplied:
+      forcedOnFieldPlayers.size === 0 ||
+      [...forcedOnFieldPlayers].every((playerId) => Object.values(normalState.bestAssignments!).includes(playerId)),
   }
 }
 
@@ -395,6 +426,11 @@ function buildLockedAssignments(
 
   for (const player of players) {
     if (player.lockedPosition && !player.lockedCanBench) {
+      if (lockedPitcherId !== undefined && player.id === lockedPitcherId && player.lockedPosition !== 'P') {
+        // Si ce joueur est impose lanceur pour cette manche, ne pas le forcer
+        // simultanement sur une autre position verrouillee.
+        continue
+      }
       lockedAssignments[player.lockedPosition] = player.id
     }
   }
@@ -443,6 +479,7 @@ function getPitcherReliefNote(
 
   const designatedPitcherState = playerStates.get(designatedPitcherId)
   if (!designatedPitcherState) return undefined
+  if (designatedPitcherId !== rules.pitcherId) return undefined
   if (designatedPitcherState.inningsPitched < rules.maxPitcherInnings) return undefined
 
   return `Relève auto: ${designatedPitcher.name} a atteint la limite (${rules.maxPitcherInnings}), ${assignedPitcher.name} prend le monticule.`
@@ -462,13 +499,18 @@ export function generateLineupLocally(
   const lockedOverrides = new Set(lockedOverrideKeys)
 
   for (let inning = 1; inning <= rules.inningsCount; inning += 1) {
+    const forcedOnFieldPlayers =
+      inning === rules.inningsCount
+        ? new Set(activePlayers.filter((player) => player.noBenchLastInning).map((player) => player.id))
+        : new Set<number>()
     const lockedAssignments = buildLockedAssignments(inning, activePlayers, rules, playerStates, manualOverrides)
-    const { assignments, score, requiredOnFieldApplied } = generateBestAssignments(
+    const { assignments, score, requiredOnFieldApplied, forcedOnFieldApplied } = generateBestAssignments(
       activePlayers,
       rules,
       playerStates,
       inning,
       lockedAssignments,
+      forcedOnFieldPlayers,
     )
     const lockedCount = FIELD_POSITIONS.filter((position) =>
       lockedOverrides.has(createOverrideKey(inning, position)),
@@ -539,6 +581,14 @@ export function generateLineupLocally(
 
     if (playersStillNeedingFirstBench > 0 && !requiredOnFieldApplied && inning === 1) {
       notes.push('Priorité banc inter-match partielle: certaines contraintes de positions empêchent l’application stricte.')
+    }
+
+    if (inning === rules.inningsCount && forcedOnFieldPlayers.size > 0) {
+      if (forcedOnFieldApplied) {
+        notes.push('Option defensive appliquee: joueurs proteges du banc sur la derniere manche.')
+      } else {
+        notes.push('Option defensive partielle: impossible de garder tous les joueurs proteges hors du banc avec les contraintes actuelles.')
+      }
     }
 
     if (inning === 1 && previousMatchContext) {
@@ -686,6 +736,7 @@ export function createMissingPlayersFromLineup(lineupData: ExportedLineup, curre
         positions: importedPlayer.positions,
         flexibilityLevel: importedPlayer.flexibilityLevel,
         excludedPositions: [],
+        noBenchLastInning: false,
       })
     }
   }
