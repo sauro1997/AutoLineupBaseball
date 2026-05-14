@@ -4,7 +4,7 @@ export const POSITION_SCORES = {
   primary: 100,
   secondary: 70,
   tertiary: 40,
-  category: 30,
+  category: 50,
   incompatible: -1000,
 } as const
 

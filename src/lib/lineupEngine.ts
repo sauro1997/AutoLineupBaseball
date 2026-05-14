@@ -292,6 +292,38 @@ function generateBestAssignments(
     return state
   }
 
+  // Equity-targeted bench: specifically try to bench the player(s) with the lowest bench history.
+  // This guarantees fair rotation even when the score-optimal solution would otherwise keep them on field
+  // (e.g. Gamelin always at his primary RF while others accumulate bench time).
+  let equityBenchState: ReturnType<typeof runSearch> | null = null
+  if (players.length > FIELD_POSITIONS.length) {
+    const benchEligiblePlayers = players.filter(
+      (p) => !mandatoryOnFieldPlayers.has(p.id) && (playerStates.get(p.id)?.benchInnings ?? 0) === 0,
+    )
+    const equityAvgs = benchEligiblePlayers.map(
+      (p) => playerStates.get(p.id)?.previousMatchAverageBenchInnings ?? 0,
+    )
+    const minEquityAvg = equityAvgs.length > 0 ? Math.min(...equityAvgs) : 0
+    const maxEquityAvg = equityAvgs.length > 0 ? Math.max(...equityAvgs) : 0
+    // Only apply when there is meaningful differentiation in bench history between players
+    if (maxEquityAvg > minEquityAvg + 0.001) {
+      const equityTargets = benchEligiblePlayers
+        .filter((p) => (playerStates.get(p.id)?.previousMatchAverageBenchInnings ?? 0) <= minEquityAvg + 0.001)
+        .sort((a, b) => a.id - b.id) // deterministic tiebreaker among tied players
+      for (const target of equityTargets) {
+        const requiredForEquity = new Set(players.filter((p) => p.id !== target.id).map((p) => p.id))
+        if (requiredForEquity.size > FIELD_POSITIONS.length) continue
+        const result = runSearch(requiredForEquity)
+        // Use this result only if the target was actually benched (not structurally forced on field)
+        if (result.bestAssignments && !Object.values(result.bestAssignments).includes(target.id)) {
+          equityBenchState = result
+          break
+        }
+      }
+    }
+  }
+
+  // Fallback: existing bench-priority logic (first match or when equity targeting fails/doesn't apply)
   const playersNeedingBenchPriority = players
     .filter((player) => {
       const state = playerStates.get(player.id)
@@ -305,12 +337,15 @@ function generateBestAssignments(
   )
 
   const shouldTryBenchPriority =
-    playersNeedingBenchPriority.length > 0 && requiredOnFieldPlayers.size <= FIELD_POSITIONS.length
+    equityBenchState === null &&
+    playersNeedingBenchPriority.length > 0 &&
+    requiredOnFieldPlayers.size <= FIELD_POSITIONS.length
 
-  const normalState = shouldTryBenchPriority ? runSearch(requiredOnFieldPlayers) : runSearch()
-  const strictBenchPriorityApplied = shouldTryBenchPriority
-    ? normalState.bestPreferredOnFieldSatisfied === requiredOnFieldPlayers.size
-    : false
+  const normalState =
+    equityBenchState ?? (shouldTryBenchPriority ? runSearch(requiredOnFieldPlayers) : runSearch())
+  const strictBenchPriorityApplied =
+    equityBenchState !== null ||
+    (shouldTryBenchPriority && normalState.bestPreferredOnFieldSatisfied === requiredOnFieldPlayers.size)
 
   if (!normalState.bestAssignments) {
     const fallbackAssignments = {} as Record<Position, number>
@@ -623,7 +658,29 @@ function strongEnforceForcedPlayers(
     }
 
     // Fallback : si aucune position compatible trouvée, forcer le remplacement
-    // d'un joueur non-forcé pour garantir que ce joueur ne reste pas au banc
+    // d'un joueur non-forcé en respectant au minimum les positions interdites
+    if (!placed) {
+      // Passe 1 : trouver une position non-interdite, sans vérifier canTakePosition complet
+      for (const position of FIELD_POSITIONS) {
+        const currentPlayerId = assignments[position]
+        if (currentPlayerId === undefined) continue
+        if (forcedOnFieldPlayers.has(currentPlayerId)) continue
+        // Respecter les positions interdites
+        if (
+          forcedPlayer.excludedPositions &&
+          forcedPlayer.excludedPositions.includes(position)
+        ) continue
+        // Respecter le verrou de position d'un autre joueur
+        const lockOwnerId = lockedAssignments[position]
+        if (lockOwnerId !== undefined && lockOwnerId !== forcedPlayerId) continue
+        assignments[position] = forcedPlayerId
+        usedPlayers.add(forcedPlayerId)
+        placed = true
+        break
+      }
+    }
+    // Passe 2 : dernier recours — ignorer toutes les contraintes sauf les autres forcés
+    // (ne viole jamais une position interdite si une alternative existe)
     if (!placed) {
       for (const position of FIELD_POSITIONS) {
         const currentPlayerId = assignments[position]
