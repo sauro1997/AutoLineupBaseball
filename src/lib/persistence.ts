@@ -1,10 +1,27 @@
-import type { FlexibilityLevel, MatchHistoryEntry, MatchRules, PersistedAppState, Player, Team } from '../domain'
+import type { FlexibilityLevel, MatchHistoryEntry, MatchRules, PersistedAppState, Player, Position, Team } from '../domain'
 import { demoRules, demoTeam } from '../data/demo'
 import { supabase } from './supabaseClient'
 
 export type SessionUser = {
   id: number
   email: string
+}
+
+export type ShareViewInning = {
+  inning: number
+  score: number
+  notes: string[]
+  bench: string[]
+  assignments: Record<Position, string>
+}
+
+export type ShareViewPayload = {
+  version: 1
+  teamName: string
+  matchLabel: string
+  matchDate: string
+  battingOrder: string[]
+  innings: ShareViewInning[]
 }
 
 type TeamRow = {
@@ -583,4 +600,74 @@ export async function saveMatchHistoryEntry(userId: number, team: Team, entry: M
   )
 
   if (error) throw error
+}
+
+function generateShareId(): string {
+  // Generate a short alphanumeric ID (8 chars)
+  const chars = 'abcdefghijkmnpqrstuvwxyz23456789'
+  let id = ''
+  for (let i = 0; i < 8; i++) {
+    id += chars.charAt(Math.floor(Math.random() * chars.length))
+  }
+  return id
+}
+
+export async function createShareLink(userId: number, team: Team, payload: ShareViewPayload): Promise<string> {
+  const db = getSupabase()
+  const dbTeam = await getOrCreateTeam(userId, team)
+
+  let shareId = generateShareId()
+  let attempts = 0
+  const maxAttempts = 5
+
+  // Retry if collision (very unlikely)
+  while (attempts < maxAttempts) {
+    const { data: existing, error: checkError } = await db
+      .from('share_links_bb')
+      .select('id')
+      .eq('id', shareId)
+      .maybeSingle()
+
+    if (checkError) throw checkError
+    if (!existing) break
+
+    shareId = generateShareId()
+    attempts++
+  }
+
+  if (attempts >= maxAttempts) {
+    throw new Error('Impossible de générer un ID de partage unique.')
+  }
+
+  const { error } = await db.from('share_links_bb').insert({
+    id: shareId,
+    team_id: dbTeam.id,
+    payload,
+    expires_at: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString(), // 90 days
+  })
+
+  if (error) throw error
+
+  return shareId
+}
+
+export async function loadShareLink(shareId: string): Promise<ShareViewPayload | null> {
+  const db = getSupabase()
+
+  const { data, error } = await db
+    .from('share_links_bb')
+    .select('payload,expires_at')
+    .eq('id', shareId)
+    .maybeSingle<{ payload: ShareViewPayload; expires_at: string | null }>()
+
+  if (error) throw error
+  if (!data) return null
+
+  // Check if link is expired
+  if (data.expires_at && new Date(data.expires_at) < new Date()) {
+    return null
+  }
+
+  // Note: View count tracking could be added with RPC function if needed
+  return data.payload
 }

@@ -32,28 +32,15 @@ import {
   registerUser,
   saveMatchHistoryEntry,
   saveRemoteState,
+  createShareLink,
+  loadShareLink,
   type SessionUser,
+  type ShareViewPayload,
+  type ShareViewInning,
 } from './lib/persistence'
 import { isSupabaseConfigured } from './lib/supabaseClient'
 
 type GeneratedLineup = ReturnType<typeof generateLineupLocally>
-
-type ShareViewInning = {
-  inning: number
-  score: number
-  notes: string[]
-  bench: string[]
-  assignments: Record<Position, string>
-}
-
-type ShareViewPayload = {
-  version: 1
-  teamName: string
-  matchLabel: string
-  matchDate: string
-  battingOrder: string[]
-  innings: ShareViewInning[]
-}
 
 type BuildVersionPayload = {
   buildId?: string
@@ -369,7 +356,46 @@ function decodeShareViewPayload(encoded: string): ShareViewPayload | null {
   }
 }
 
-function readShareViewTokenFromLocation() {
+async function loadShareViewFromDbOrLegacy(): Promise<ShareViewPayload | null> {
+  // Try new DB-based share links first
+  const shareIdFromUrl = readShareIdFromLocation()
+  if (shareIdFromUrl) {
+    try {
+      const payload = await loadShareLink(shareIdFromUrl)
+      if (payload) {
+        return payload
+      }
+    } catch (error) {
+      console.error('Erreur lors du chargement du lien de partage:', error)
+    }
+  }
+
+  // Fall back to legacy URL-encoded share links
+  const legacyToken = readLegacyShareTokenFromLocation()
+  if (legacyToken) {
+    return decodeShareViewPayload(legacyToken)
+  }
+
+  // Try old ?view= parameter for backward compatibility
+  const oldViewToken = readOldShareViewTokenFromLocation()
+  if (oldViewToken) {
+    return decodeShareViewPayload(oldViewToken)
+  }
+
+  return null
+}
+
+function readShareIdFromLocation() {
+  const params = new URLSearchParams(window.location.search)
+  return params.get('id')
+}
+
+function readLegacyShareTokenFromLocation() {
+  if (!window.location.hash.startsWith('#share=')) return null
+  return window.location.hash.slice('#share='.length)
+}
+
+function readOldShareViewTokenFromLocation() {
   const params = new URLSearchParams(window.location.search)
   const queryToken = params.get('view')
   if (queryToken) return queryToken
@@ -379,11 +405,6 @@ function readShareViewTokenFromLocation() {
   }
 
   return null
-}
-
-function readLegacyShareTokenFromLocation() {
-  if (!window.location.hash.startsWith('#share=')) return null
-  return window.location.hash.slice('#share='.length)
 }
 
 function normalizeNumericId(value: unknown) {
@@ -659,32 +680,39 @@ function App() {
   }
 
   useEffect(() => {
-    const shareViewToken = readShareViewTokenFromLocation()
-    if (shareViewToken) {
-      const decodedPayload = decodeShareViewPayload(shareViewToken)
-      if (!decodedPayload) {
-        setStatus('Lien partage manches invalide ou incomplet.')
+    async function loadShareView() {
+      const payload = await loadShareViewFromDbOrLegacy()
+      if (payload) {
+        setShareViewPayload(payload)
+        setStatus('Mode partage activé: lecture seule des manches.')
         return
       }
 
-      setShareViewPayload(decodedPayload)
-      setStatus('Mode partage activé: lecture seule des manches.')
-      return
+      // Try legacy non-shareable link format (full encoded state)
+      const legacyShareToken = readLegacyShareTokenFromLocation()
+      if (!legacyShareToken) return
+
+      const decodedState = decodeShareState(legacyShareToken)
+      if (!decodedState) {
+        setStatus('Lien de partage legacy invalide.')
+        return
+      }
+
+      const normalizedState = normalizePersistedState(decodedState)
+      applyPersistedState(normalizedState)
+      setStatus('Lien de partage legacy chargé.')
     }
 
-    const legacyShareToken = readLegacyShareTokenFromLocation()
-    if (!legacyShareToken) return
-
-    const decodedState = decodeShareState(legacyShareToken)
-    if (!decodedState) {
-      setStatus('Lien de partage legacy invalide.')
-      return
-    }
-
-    const normalizedState = normalizePersistedState(decodedState)
-    applyPersistedState(normalizedState)
-    setStatus('Lien de partage legacy chargé.')
+    void loadShareView().catch((error) => {
+      console.error('Erreur lors du chargement du partage:', error)
+      setStatus('Erreur lors du chargement du lien de partage.')
+    })
   }, [])
+
+  function readLegacyShareTokenFromLocation() {
+    if (!window.location.hash.startsWith('#share=')) return null
+    return window.location.hash.slice('#share='.length)
+  }
 
   useEffect(() => {
     if (isShareViewerMode) return
@@ -1259,10 +1287,26 @@ function App() {
       })),
     }
 
+    // Create share link in database if authenticated
+    if (isSupabaseConfigured && authUser) {
+      try {
+        const shareId = await createShareLink(authUser.id, team, payload)
+        const link = `${window.location.origin}${window.location.pathname}?id=${shareId}`
+        await window.navigator.clipboard.writeText(link)
+        setStatus(`Lien court copié: ${shareId}`)
+        return
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Erreur inconnue.'
+        setStatus(`Impossible de créer le lien de partage: ${message}`)
+        return
+      }
+    }
+
+    // Fallback to long URL-encoded share link if not authenticated or Supabase not configured
     const encodedPayload = encodeShareViewPayload(payload)
     const link = `${window.location.origin}${window.location.pathname}?view=${encodedPayload}`
     await window.navigator.clipboard.writeText(link)
-    setStatus('Lien viewer des manches copié dans le presse-papiers.')
+    setStatus('Lien viewer des manches copié dans le presse-papiers (lien long - connecte-toi pour un lien court).')
   }
 
   async function handleRegister() {
@@ -2326,15 +2370,48 @@ function App() {
                       <tr>
                         <th>Position</th>
                         <th>Joueur</th>
+                        {!selectedHistoryMatch && <th>Lock</th>}
                       </tr>
                     </thead>
                     <tbody>
                       {FIELD_POSITIONS.map((position) => {
-                        const assignedPlayerId = inning.assignments[position]
+                        const overrideKey = createOverrideKey(inning.inning, position)
                         return (
-                          <tr key={`print-${printTargetMatch?.id ?? 'current'}-${inning.inning}-${position}`}>
+                          <tr key={position}>
                             <td><PosBadge position={position} /></td>
-                            <td>{resolvePlayerName(assignedPlayerId)}</td>
+                            <td>
+                              {selectedHistoryMatch ? (
+                                resolvePlayerName(inning.assignments[position])
+                              ) : (
+                                <select
+                                  value={manualOverrides[overrideKey] ?? inning.assignments[position]}
+                                  onChange={(event) =>
+                                    updateOverride(
+                                      inning.inning,
+                                      position,
+                                      event.target.value ? Number(event.target.value) : undefined,
+                                    )
+                                  }
+                                >
+                                  {activePlayers.map((player) => (
+                                    <option key={player.id} value={player.id}>
+                                      {player.name}
+                                    </option>
+                                  ))}
+                                </select>
+                              )}
+                            </td>
+                            {!selectedHistoryMatch && (
+                              <td>
+                                <button
+                                  type="button"
+                                  className={lockedOverrides.includes(overrideKey) ? 'active-lock' : 'ghost'}
+                                  onClick={() => toggleLockedOverride(inning.inning, position)}
+                                >
+                                  {lockedOverrides.includes(overrideKey) ? 'Verrouillé' : 'Libre'}
+                                </button>
+                              </td>
+                            )}
                           </tr>
                         )
                       })}
@@ -2346,7 +2423,7 @@ function App() {
                 </p>
                 <ul className="notes-list">
                   {inning.notes.map((note) => (
-                    <li key={`print-note-${printTargetMatch?.id ?? 'current'}-${inning.inning}-${note}`}>{note}</li>
+                    <li key={note}>{note}</li>
                   ))}
                 </ul>
               </article>
