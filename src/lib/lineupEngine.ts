@@ -211,6 +211,8 @@ function generateBestAssignments(
 
   for (const [position, playerId] of Object.entries(lockedAssignments) as Array<[Position, number]>) {
     if (seededPlayers.has(playerId)) continue
+    // Ignorer les joueurs absents/inconnus qui ne sont pas dans playersById
+    if (!playersById[playerId]) continue
     sanitizedLockedAssignments[position] = playerId
     seededAssignments[position] = playerId
     seededPlayers.add(playerId)
@@ -455,7 +457,10 @@ function buildLockedAssignments(
 
   if (rules.fixedCenterField) {
     for (const assignment of rules.fixedAssignments) {
-      lockedAssignments[assignment.position] = assignment.playerId
+      // Ne pas verrouiller une position pour un joueur absent
+      if (playerStates.has(assignment.playerId)) {
+        lockedAssignments[assignment.position] = assignment.playerId
+      }
     }
   }
 
@@ -473,7 +478,8 @@ function buildLockedAssignments(
   for (const position of FIELD_POSITIONS) {
     const overrideKey = createOverrideKey(inning, position)
     const playerId = manualOverrides[overrideKey]
-    if (playerId !== undefined) lockedAssignments[position] = playerId
+    // Ignorer les overrides pour les joueurs absents (pas dans playerStates)
+    if (playerId !== undefined && playerStates.has(playerId)) lockedAssignments[position] = playerId
   }
 
   return lockedAssignments as Record<Position, number>
@@ -897,6 +903,20 @@ export function generateLineupLocally(
         playerIds.has(overridePlayerId) &&
         getCompatibilityScore(activePlayers.find((player) => player.id === overridePlayerId)!, position) > POSITION_SCORES.incompatible
       ) {
+        // Si le joueur est déjà assigné à une autre position (ex: lockedPosition),
+        // effectuer un SWAP avec le joueur actuellement à la position cible.
+        const prevPosition = (Object.entries(assignments) as Array<[Position, number]>)
+          .find(([, pid]) => pid === overridePlayerId)?.[0]
+        const displacedPlayerId = assignments[position]
+
+        if (prevPosition !== undefined && prevPosition !== position) {
+          // Déplacer le joueur évincé à l'ancienne position du joueur overridé
+          if (displacedPlayerId !== undefined && displacedPlayerId !== overridePlayerId) {
+            assignments[prevPosition] = displacedPlayerId
+          } else {
+            delete assignments[prevPosition]
+          }
+        }
         assignments[position] = overridePlayerId
       }
     }
@@ -929,6 +949,21 @@ export function generateLineupLocally(
         assignments,
         lockedAssignments,
       )
+
+    // Garde finale : supprimer tout doublon résiduel (un joueur à deux positions).
+    // Seule la première occurrence (ordre FIELD_POSITIONS) est conservée.
+    {
+      const seen = new Set<number>()
+      for (const pos of FIELD_POSITIONS) {
+        const pid = assignments[pos]
+        if (pid === undefined) continue
+        if (seen.has(pid)) {
+          delete assignments[pos]
+        } else {
+          seen.add(pid)
+        }
+      }
+    }
 
     const usedPlayers = new Set(Object.values(assignments))
     const bench = activePlayers.filter((player) => !usedPlayers.has(player.id)).map((player) => player.id)

@@ -587,12 +587,23 @@ function normalizePersistedState(state: PersistedAppState): PersistedAppState {
       fixedCenterFieldPosition: 'CF',
       fixedAssignments: [],
     },
-    manualOverrides: Object.fromEntries(
-      Object.entries(state.manualOverrides).flatMap(([key, value]) => {
+    manualOverrides: (() => {
+      // Normaliser et dédupliquer : un joueur ne peut apparaître qu'à une seule position par manche.
+      // La première occurrence (en ordre de clé) est conservée.
+      const seenPerInning = new Map<string, Set<number>>()
+      const entries: [string, number][] = []
+      for (const [key, value] of Object.entries(state.manualOverrides)) {
         const normalized = normalizeNumericId(value)
-        return normalized ? [[key, normalized]] : []
-      }),
-    ) as ManualOverrideMap,
+        if (!normalized) continue
+        const inningKey = key.split(':')[0]
+        if (!seenPerInning.has(inningKey)) seenPerInning.set(inningKey, new Set())
+        const seen = seenPerInning.get(inningKey)!
+        if (seen.has(normalized)) continue // doublon → ignorer
+        seen.add(normalized)
+        entries.push([key, normalized])
+      }
+      return Object.fromEntries(entries) as ManualOverrideMap
+    })(),
     matchHistory: (state.matchHistory ?? []).map((match, index) => ({
       id: String(match.id ?? `${Date.now()}-${index + 1}`),
       label: typeof match.label === 'string' ? match.label : `Match ${index + 1}`,
@@ -1045,7 +1056,12 @@ function App() {
       noBenchLastInning: false,
     }
 
-    setPlayers((currentPlayers) => [...currentPlayers, newPlayer])
+    const nextPlayers = [...players, newPlayer]
+    setPlayers(nextPlayers)
+    const nextActivePlayers = nextPlayers.filter(isActivePlayer)
+    if (nextActivePlayers.length >= FIELD_POSITIONS.length) {
+      setLineup(generateLineupLocally(nextPlayers, rules, manualOverrides, lockedOverrides, previousMatchContext))
+    }
     setStatus('Joueur ajouté au roster.')
   }
 
@@ -1138,13 +1154,27 @@ function App() {
 
   function updateOverride(inning: number, position: Position, playerId?: number) {
     const key = createOverrideKey(inning, position)
+    // Calculer les prochains overrides de façon synchrone pour pouvoir régénérer le lineup immédiatement.
     setManualOverrides((current) => {
       const next = { ...current }
       if (playerId !== undefined) {
+        // Supprimer tout override existant pour ce même joueur dans la même manche (autre position)
+        // afin d'éviter qu'il apparaisse à deux positions différentes.
+        for (const otherPosition of FIELD_POSITIONS) {
+          if (otherPosition !== position) {
+            const otherKey = createOverrideKey(inning, otherPosition)
+            if (next[otherKey] === playerId) {
+              delete next[otherKey]
+            }
+          }
+        }
         next[key] = playerId
       } else {
         delete next[key]
       }
+      // Régénérer le lineup avec les nouveaux overrides dans la même passe de mise à jour
+      // pour éviter tout décalage entre manualOverrides et inning.assignments affiché.
+      setLineup(generateLineupLocally(players, rules, next as ManualOverrideMap, lockedOverrides, previousMatchContext))
       return next
     })
     setStatus(`Override mis à jour pour la manche ${inning}, position ${position}.`)
@@ -2459,7 +2489,7 @@ function App() {
                                 resolvePlayerName(inning.assignments[position])
                               ) : (
                                 <select
-                                  value={manualOverrides[overrideKey] ?? inning.assignments[position]}
+                                  value={inning.assignments[position] ?? ''}
                                   onChange={(event) =>
                                     updateOverride(
                                       inning.inning,
@@ -2583,7 +2613,7 @@ function App() {
                             </select>
                           ) : (
                             <select
-                              value={manualOverrides[overrideKey] ?? inning.assignments[position]}
+                              value={inning.assignments[position] ?? ''}
                               onChange={(event) =>
                                 updateOverride(
                                   inning.inning,
